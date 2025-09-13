@@ -1,0 +1,79 @@
+services:
+  kafka:
+    image: bitnami/kafka:3.7
+    container_name: kafka
+    environment:
+      - KAFKA_ENABLE_KRAFT=yes
+      - KAFKA_CFG_NODE_ID=1
+      - KAFKA_CFG_PROCESS_ROLES=broker,controller
+      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=1@kafka:9093
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+      - KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+      - KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
+      - KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR=1
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka_data:/bitnami/kafka
+    healthcheck:
+      test: ["CMD", "bash", "-c", "kafka-topics.sh --bootstrap-server kafka:9092 --list"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+
+  orchestrator:
+    build:
+      context: ../services/orchestrator
+      dockerfile: Dockerfile
+    env_file:
+      - ../config/app.env
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+
+  window_loader:
+    build:
+      context: ../services/window_loader
+      dockerfile: Dockerfile
+    env_file:
+      - ../config/app.env
+    volumes:
+      - ../data:/app/data:rw
+    ports:
+      - "8081:8081"
+
+
+
+  agent:
+    build:
+      context: ../services/agent
+      dockerfile: Dockerfile
+    env_file:
+      - ../config/app.env
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  window_collector:
+    build:
+      context: ../services/window_collector
+      dockerfile: Dockerfile
+    env_file:
+      - ../config/app.env
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ../data:/app/data:rw
+    ports:
+      - "8082:8082"
+
+volumes:
+  kafka_data:

@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pyenv
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# Entornos / credenciales
+.env
+config/app.env
+docker/*.env
+
+# Datos locales
+data/*
+!data/.gitkeep
+!data/simple_window.csv
+
+# Otros
+.DS_Store

@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TelemetryEvent",
+  "type": "object",
+  "required": ["ts", "unit_id"],
+  "properties": {
+    "trace_id": { "type": "string" },
+    "ts": {
+      "description": "Timestamp ISO-8601 o epoch ms",
+      "oneOf": [
+        { "type": "string", "format": "date-time" },
+        { "type": "integer", "minimum": 0 }
+      ]
+    },
+    "unit_id": { "type": "string", "minLength": 1 },
+    "features": {
+      "type": "object",
+      "additionalProperties": { "type": ["number", "string", "boolean", "null"] }
+    },
+    "v1": { "type": ["number", "null"] },
+    "v2": { "type": ["number", "null"] },
+    "v3": { "type": ["number", "null"] },
+    "v4": { "type": ["number", "null"] },
+    "v5": { "type": ["integer", "null"] }
+  },
+  "additionalProperties": true
+}

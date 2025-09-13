@@ -1,0 +1,57 @@
+import os, json, threading
+import pandas as pd
+from kafka import KafkaConsumer, KafkaProducer
+from fastapi import FastAPI
+import uvicorn
+
+BROKER = os.getenv("KAFKA_BROKER", "kafka:9092")
+TOUT = os.getenv("TOPIC_AGENT_OUT", "telemetry.agent.out")
+TPROC = os.getenv("TOPIC_PROCESSED", "telemetry.processed")
+OUTPATH = os.getenv("OUTPUT_PATH", "/app/data/processed_window.parquet")
+
+app = FastAPI()
+_buffer = []
+_lock = threading.Lock()
+
+def run_consumer():
+    consumer = KafkaConsumer(TOUT, bootstrap_servers=BROKER,
+                             value_deserializer=lambda v: json.loads(v.decode("utf-8")),
+                             auto_offset_reset="earliest", enable_auto_commit=True,
+                             group_id="collector-v1")
+    producer = KafkaProducer(bootstrap_servers=BROKER,
+                             value_serializer=lambda v: json.dumps(v).encode("utf-8"))
+    for msg in consumer:
+        rec = msg.value
+        producer.send(TPROC, rec)
+        with _lock:
+            _buffer.append(rec)
+
+@app.post("/reset")
+def reset():
+    global _buffer
+    with _lock:
+        _buffer = []
+    # borra salida anterior
+    try:
+        os.remove(OUTPATH)
+    except FileNotFoundError:
+        pass
+    return {"status":"reset"}
+
+@app.get("/flush")
+def flush():
+    with _lock:
+        df = pd.DataFrame(_buffer)
+    if not df.empty:
+        if OUTPATH.endswith(".parquet"):
+            df.to_parquet(OUTPATH, index=False)
+        elif OUTPATH.endswith(".csv"):
+            df.to_csv(OUTPATH, index=False)
+        else:
+            df.to_json(OUTPATH, orient="records", lines=True)
+    return {"rows": len(df), "path": OUTPATH}
+
+if __name__ == "__main__":
+    t = threading.Thread(target=run_consumer, daemon=True)
+    t.start()
+    uvicorn.run(app, host="0.0.0.0", port=8082)
