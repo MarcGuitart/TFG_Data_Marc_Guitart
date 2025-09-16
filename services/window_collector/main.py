@@ -12,36 +12,57 @@ OUTPATH = os.getenv("OUTPUT_PATH", "/app/data/processed_window.parquet")
 app = FastAPI()
 _buffer = []
 _lock = threading.Lock()
+_last_by_key = {}
+
+@app.on_event("startup")
+def start_bg():
+    threading.Thread(target=run_consumer, daemon=True).start()
 
 def run_consumer():
-    consumer = KafkaConsumer(TOUT, bootstrap_servers=BROKER,
-                             value_deserializer=lambda v: json.loads(v.decode("utf-8")),
-                             auto_offset_reset="earliest", enable_auto_commit=True,
-                             group_id="collector-v1")
-    producer = KafkaProducer(bootstrap_servers=BROKER,
-                             value_serializer=lambda v: json.dumps(v).encode("utf-8"))
+    consumer = KafkaConsumer(
+        TOUT,
+        bootstrap_servers=BROKER,
+        value_deserializer=lambda v: json.loads(v.decode("utf-8")),
+        auto_offset_reset="earliest",
+        enable_auto_commit=True,
+        group_id="collector-v1",
+    )
+    producer = KafkaProducer(
+        bootstrap_servers=BROKER,
+        value_serializer=lambda v: json.dumps(v).encode("utf-8"),
+    )
+
+    # Campos de clave para deduplicar (orden estable)
+    key_fields = [s.strip() for s in os.getenv("DEDUP_KEY", "ts,unit_id").split(",") if s.strip()]
+
     for msg in consumer:
         rec = msg.value
+        # Publica en 'telemetry.processed' como “sink” intermedio (opcional)
         producer.send(TPROC, rec)
+
+        # Construye la clave y guarda la última versión
+        k = tuple(rec.get(f) for f in key_fields)
         with _lock:
-            _buffer.append(rec)
+            _last_by_key[k] = rec
+
 
 @app.post("/reset")
 def reset():
-    global _buffer
+    global _last_by_key
     with _lock:
-        _buffer = []
-    # borra salida anterior
+        _last_by_key = {}
     try:
         os.remove(OUTPATH)
     except FileNotFoundError:
         pass
-    return {"status":"reset"}
+    return {"status": "reset"}
 
 @app.get("/flush")
 def flush():
     with _lock:
-        df = pd.DataFrame(_buffer)
+        snapshot = list(_last_by_key.values())
+
+    df = pd.DataFrame(snapshot)
     if not df.empty:
         if OUTPATH.endswith(".parquet"):
             df.to_parquet(OUTPATH, index=False)
@@ -49,7 +70,9 @@ def flush():
             df.to_csv(OUTPATH, index=False)
         else:
             df.to_json(OUTPATH, orient="records", lines=True)
+
     return {"rows": len(df), "path": OUTPATH}
+
 
 if __name__ == "__main__":
     t = threading.Thread(target=run_consumer, daemon=True)

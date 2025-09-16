@@ -1,15 +1,14 @@
-# TFG\_Agente\_Data — Pipeline de Telemetría con Kafka (Semana 1)
+# TFG_Agente_Data — Pipeline de Telemetría con Kafka (Semana 1)
 
 > **Estado**: pipeline base funcionando (modo `identity`). Loader → Kafka → Agent → Kafka → Collector → Parquet.
 
 ---
 
 ## 🧭 Resumen
-
 Este repo contiene un pipeline mínimo para ingerir un bloque de datos (CSV), moverlo por **Kafka**, procesarlo con un **Agent** (por ahora identidad) y persistir el resultado en **Parquet** mediante un **Collector**.
 
-* **Objetivo**: tener un esqueleto de arquitectura event-driven sobre Kafka y comprobar fin a fin que los datos fluyen y se validan.
-* **Resultado esperado**: un fichero `/app/data/processed_window.parquet` con 900 filas (3 unidades × 300 muestras) idénticas al CSV de entrada en modo `identity`.
+- **Objetivo**: tener un esqueleto de arquitectura event-driven sobre Kafka y comprobar fin a fin que los datos fluyen y se validan.
+- **Resultado esperado**: un fichero `/app/data/processed_window.parquet` con 900 filas (3 unidades × 300 muestras) idénticas al CSV de entrada en modo `identity`.
 
 ---
 
@@ -30,39 +29,35 @@ flowchart LR
 ```
 
 ### Servicios
-
-* **kafka**: broker de mensajería (Bitnami 3.7, KRaft).
-* **orchestrator** (FastAPI): endpoint `/trigger` para resetear el collector e iniciar el loader.
-* **window\_loader** (FastAPI): lee `DATA_PATH` (CSV) y publica mensajes.
-* **agent**: consume de Kafka, aplica `PROCESS_MODE` (ahora `identity`) y re-publica.
-* **window\_collector** (FastAPI): consume del topic procesado y guarda en `OUTPUT_PATH` (Parquet). `/flush` devuelve conteo de filas escritas.
+- **kafka**: broker de mensajería (Bitnami 3.7, KRaft).
+- **orchestrator** (FastAPI): endpoint `/trigger` para resetear el collector e iniciar el loader.
+- **window_loader** (FastAPI): lee `DATA_PATH` (CSV) y publica mensajes.
+- **agent**: consume de Kafka, aplica `PROCESS_MODE` (ahora `identity`) y re-publica.
+- **window_collector** (FastAPI): consume del topic procesado y guarda en `OUTPUT_PATH` (Parquet). `/flush` devuelve conteo de filas escritas.
 
 ---
 
 ## 🧩 Tópicos Kafka
-
-* `telemetry.raw` → datos crudos publicados por **window\_loader**.
-* `telemetry.agent.in` → (opcional/intermedio) entrada del **agent**.
-* `telemetry.agent.out` → salida del **agent**.
-* `telemetry.processed` → consumido por **window\_collector** para persistir.
+- `telemetry.raw` → datos crudos publicados por **window_loader**.
+- `telemetry.agent.in` → (opcional/intermedio) entrada del **agent**.
+- `telemetry.agent.out` → salida del **agent**.
+- `telemetry.processed` → consumido por **window_collector** para persistir.
 
 > Nota: en este MVP usamos **1 partición** por topic para conservar **orden total**.
 
 ---
 
 ## ⚙️ Variables de entorno (en `config/app.env`)
-
 ```env
 DATA_PATH=/app/data/simple_window.csv
 OUTPUT_PATH=/app/data/processed_window.parquet
 KAFKA_BROKER=kafka:9092
 PROCESS_MODE=identity
 ```
-
-* `DATA_PATH`: CSV de entrada montado en el contenedor (`../data` → `/app/data`).
-* `OUTPUT_PATH`: ruta del Parquet de salida dentro del contenedor.
-* `KAFKA_BROKER`: host\:puerto del broker (dentro de la red de Docker).
-* `PROCESS_MODE`: `identity` por defecto (no transforma). Útil para pruebas A=B.
+- `DATA_PATH`: CSV de entrada montado en el contenedor (`../data` → `/app/data`).
+- `OUTPUT_PATH`: ruta del Parquet de salida dentro del contenedor.
+- `KAFKA_BROKER`: host:puerto del broker (dentro de la red de Docker).
+- `PROCESS_MODE`: `identity` por defecto (no transforma). Útil para pruebas A=B.
 
 `docker-compose.yml` usa `env_file: ../config/app.env` y mapea `../data:/app/data` donde corresponda.
 
@@ -71,19 +66,16 @@ PROCESS_MODE=identity
 ## 🚀 Quick start
 
 ### 0) Requisitos
-
-* Docker Desktop (o equivalente) y `docker compose`.
-* `make` (opcional, si usas los targets).
+- Docker Desktop (o equivalente) y `docker compose`.
+- `make` (opcional, si usas los targets).
 
 ### 1) Construir y levantar
-
 ```bash
 make build
 make up
 ```
 
 ### 2) Lanzar el pipeline
-
 ```bash
 # Opción A: vía orchestrator
 curl -s -X POST http://localhost:8080/trigger | jq .
@@ -93,7 +85,6 @@ curl -s -X POST http://localhost:8081/start | jq .
 ```
 
 ### 3) Verificar salida
-
 ```bash
 curl -s http://localhost:8082/flush | jq .
 # → { "rows": 900, "path": "/app/data/processed_window.parquet" }
@@ -105,23 +96,18 @@ ls -lh data/processed_window.parquet
 ---
 
 ## 🔌 Endpoints
-
-* **Orchestrator** (`:8080`)
-
-  * `GET /health` → `{status: "ok"}`
-  * `POST /trigger` → resetea collector e inicia loader; devuelve JSON con respuesta del loader
-* **Window Loader** (`:8081`)
-
-  * `POST /start` → envía N mensajes al topic de entrada
-* **Window Collector** (`:8082`)
-
-  * `POST /reset` → limpia estado interno (si aplica)
-  * `GET /flush` → fuerza volcado/retorno de métricas `{rows, path}`
+- **Orchestrator** (`:8080`)
+  - `GET /health` → `{status: "ok"}`
+  - `POST /trigger` → resetea collector e inicia loader; devuelve JSON con respuesta del loader
+- **Window Loader** (`:8081`)
+  - `POST /start` → envía N mensajes al topic de entrada
+- **Window Collector** (`:8082`)
+  - `POST /reset` → limpia estado interno (si aplica)
+  - `GET /flush` → fuerza volcado/retorno de métricas `{rows, path}`
 
 ---
 
 ## 🔄 Flujo de datos (paso a paso)
-
 1. **Loader** lee `DATA_PATH` (CSV) → publica cada fila como mensaje en `telemetry.raw`.
 2. **Agent** consume de `telemetry.raw` (o `telemetry.agent.in`), aplica `PROCESS_MODE` y publica en `telemetry.agent.out`.
 3. **Collector** consume `telemetry.agent.out` (o `telemetry.processed` según wiring) y va escribiendo a `OUTPUT_PATH` (Parquet).
@@ -130,9 +116,7 @@ ls -lh data/processed_window.parquet
 ---
 
 ## ✅ Validación de contenido (CSV vs Parquet)
-
 Comparación determinista dentro de `window_collector`:
-
 ```bash
 docker compose exec -T window_collector python - <<'PY'
 import pandas as pd
@@ -149,7 +133,6 @@ PY
 ```
 
 Checks útiles:
-
 ```bash
 docker compose exec -T window_collector python - <<'PY'
 import pandas as pd
@@ -166,24 +149,18 @@ PY
 ---
 
 ## 🛠️ Operaciones comunes
-
 Logs rápidos:
-
 ```bash
 # servicio concreto
 docker compose logs -f --tail=200 window_loader
 # todos
 make logs
 ```
-
 Inspeccionar variables dentro de los contenedores:
-
 ```bash
 docker compose exec -T window_loader env | egrep 'DATA_PATH|OUTPUT_PATH|KAFKA_BROKER|PROCESS_MODE'
 ```
-
 Listar datos montados:
-
 ```bash
 docker compose exec -T window_loader ls -lh /app/data
 ```
@@ -191,37 +168,29 @@ docker compose exec -T window_loader ls -lh /app/data
 ---
 
 ## 🧯 Troubleshooting
+- **`jq: Invalid numeric literal` al hacer `make trigger`**
+  - Causa: `/trigger` no devolvía JSON. Solución: devolver un `dict`/JSON en FastAPI (ya está implementado) o quitar `| jq .` del Makefile.
 
-* **`jq: Invalid numeric literal` al hacer `make trigger`**
+- **Variables vacías en `window_loader`**
+  - Causa: mezclar `env_file` y `environment` mal definidos. Solución: deja solo `env_file: ../config/app.env` o mapea explícito `environment: {VAR: ${VAR}}`.
 
-  * Causa: `/trigger` no devolvía JSON. Solución: devolver un `dict`/JSON en FastAPI (ya está implementado) o quitar `| jq .` del Makefile.
+- **`FileNotFoundError: /app/data/sample_window.parquet`**
+  - Causa: `DATA_PATH` apuntaba a un Parquet inexistente o 0B. Solución: usar `simple_window.csv` o regenerar el fichero.
 
-* **Variables vacías en `window_loader`**
+- **`the input device is not a TTY`**
+  - Usa `docker compose exec -T ...` cuando ejecutes Python con heredoc.
 
-  * Causa: mezclar `env_file` y `environment` mal definidos. Solución: deja solo `env_file: ../config/app.env` o mapea explícito `environment: {VAR: ${VAR}}`.
-
-* **`FileNotFoundError: /app/data/sample_window.parquet`**
-
-  * Causa: `DATA_PATH` apuntaba a un Parquet inexistente o 0B. Solución: usar `simple_window.csv` o regenerar el fichero.
-
-* **`the input device is not a TTY`**
-
-  * Usa `docker compose exec -T ...` cuando ejecutes Python con heredoc.
-
-* **No se persisten filas**
-
-  * Revisa `window_collector` y su topic de entrada. Comprueba `KAFKA_BROKER` y salud de Kafka.
+- **No se persisten filas**
+  - Revisa `window_collector` y su topic de entrada. Comprueba `KAFKA_BROKER` y salud de Kafka.
 
 ---
 
 ## 🌿 Estrategia de ramas (Git)
-
-* `main`: estable, sólo merges desde `dev` al final del proyecto.
-* `dev`: integración continua de semanas.
-* Ramas semanales desde `dev`: `w01-environment`, `w02-<tema>`, ... → PR a `dev`.
+- `main`: estable, sólo merges desde `dev` al final del proyecto.
+- `dev`: integración continua de semanas.
+- Ramas semanales desde `dev`: `w01-environment`, `w02-<tema>`, ... → PR a `dev`.
 
 ### Pasos típicos
-
 ```bash
 git switch main && git pull --ff-only
 git switch -c dev && git push -u origin dev
@@ -240,19 +209,16 @@ git push -u origin w01-environment
 ---
 
 ## 📌 Roadmap de aprendizaje Kafka (mini-guía)
-
 1. **Offsets**: genera 900 mensajes y observa cómo avanza el grupo `collector-v1` al reiniciar el collector.
 2. **Particiones**: crea topic con `--partitions 3`, produce con key `unit_id` y verifica orden por key.
 3. **Fallos simulados**:
-
-   * Apaga `agent` mientras `loader` envía → se acumulan mensajes. Enciende `agent` y verifica catch-up.
-   * Apaga `window_collector` y repite; luego `/flush`.
+   - Apaga `agent` mientras `loader` envía → se acumulan mensajes. Enciende `agent` y verifica catch-up.
+   - Apaga `window_collector` y repite; luego `/flush`.
 4. **Transformaciones**: cambia `PROCESS_MODE` (p.ej., `v1 = v1 * 1.1`) y comprueba que ya **no** es `OK: True` (demuestra el papel del agent).
 
 ---
 
 ## 📂 Estructura (simplificada)
-
 ```
 .
 ├─ config/
@@ -273,5 +239,5 @@ git push -u origin w01-environment
 ---
 
 ## 📄 Licencia
-
 Define aquí la licencia del proyecto (MIT/Apache-2.0/etc.) si aplica.
+
