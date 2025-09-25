@@ -17,6 +17,10 @@ def _producer():
     return KafkaProducer(bootstrap_servers=BROKER,
                          value_serializer=lambda v: json.dumps(v).encode("utf-8"))
 
+@app.post("/trigger")
+async def trigger_window_loader():
+    return start()
+
 @app.post("/start")
 def start():
     df = pd.read_parquet(DATA_PATH) if DATA_PATH.endswith(".parquet") else pd.read_csv(DATA_PATH)

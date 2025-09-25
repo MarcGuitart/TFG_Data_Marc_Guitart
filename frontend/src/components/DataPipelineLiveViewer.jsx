@@ -9,10 +9,23 @@ const endpoints = {
   kafkaOut: "http://localhost:8081/kafka/out",
 };
 
+const triggerPipeline = async () => {
+  try {
+    const res = await fetch('http://localhost:8081/start', { method: 'POST' });
+    const json = await res.json();
+    alert(`Datos enviados: ${json.sent}`);
+  } catch (err) {
+    alert("Error al iniciar el pipeline");
+    console.error(err);
+  }
+};
+
+
 export default function DataPipelineLiveViewer() {
   const [kafkaInData, setKafkaInData] = useState([]);
   const [agentLogs, setAgentLogs] = useState([]);
   const [kafkaOutData, setKafkaOutData] = useState([]);
+  
 
   // CSV subido y estado de selección
   const [rows, setRows] = useState([]);     // [{ id, timestamp, var }]
@@ -136,6 +149,9 @@ export default function DataPipelineLiveViewer() {
                 {uploadError}
               </div>
             )}
+            <button onClick={triggerPipeline} className="start-button">
+              🚀 Ejecutar agente
+            </button>
           </div>
         </Section>
 

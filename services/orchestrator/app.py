@@ -1,4 +1,8 @@
-from fastapi import FastAPI
+
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, UploadFile, File
+import aiofiles, os, httpx
+from dotenv import load_dotenv
 import os, requests
 
 try:
@@ -8,8 +12,42 @@ except Exception:
 
 LOADER_URL = os.getenv("LOADER_URL", "http://window_loader:8081/start")
 COLLECTOR_URL = os.getenv("COLLECTOR_URL", "http://window_collector:8082/reset")
+load_dotenv("config/app.env")
 
-app = FastAPI(title="Orchestrator", version="0.1.0")
+app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],  
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+DATA_DIR = "/app/data"
+os.makedirs(DATA_DIR, exist_ok=True)
+
+@app.post("/api/upload_csv")
+async def upload_csv(file: UploadFile = File(...)):
+    path = os.path.join(DATA_DIR, "uploaded.csv")
+    async with aiofiles.open(path, "wb") as f:
+        content = await file.read()
+        await f.write(content)
+    return {"saved": True, "path": path}
+
+@app.post("/api/run_window")
+async def run_window():
+    # reset collector
+    async with httpx.AsyncClient() as client:
+        await client.post("http://window_collector:8082/reset")
+        # dispara el loader
+        r = await client.post("http://window_loader:8081/trigger", json={"source":"uploaded"})
+        return {"triggered": True, "loader_response": r.json()}
+
+@app.get("/api/flush")
+async def flush():
+    async with httpx.AsyncClient() as client:
+        r = await client.get("http://window_collector:8082/flush")
+        return r.json()
 
 @app.get("/health")
 def health():

@@ -15,7 +15,7 @@ config/app.env
 docker/*.env
 
 # Datos locales
-data/*
+!data/test_csvs/
 !data/.gitkeep
 !data/simple_window.csv
 
