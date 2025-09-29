@@ -8,6 +8,7 @@ BROKER = os.getenv("KAFKA_BROKER", "kafka:9092")
 TOUT = os.getenv("TOPIC_AGENT_OUT", "telemetry.agent.out")
 TPROC = os.getenv("TOPIC_PROCESSED", "telemetry.processed")
 OUTPATH = os.getenv("OUTPUT_PATH", "/app/data/processed_window.parquet")
+os.makedirs(os.path.dirname(OUTPATH), exist_ok=True)
 
 app = FastAPI()
 _buffer = []
@@ -44,6 +45,10 @@ def run_consumer():
         k = tuple(rec.get(f) for f in key_fields)
         with _lock:
             _last_by_key[k] = rec
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 
 
 @app.post("/reset")

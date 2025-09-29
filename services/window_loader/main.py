@@ -1,7 +1,7 @@
 import os, time
 import pandas as pd
 from kafka import KafkaProducer
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 import uvicorn
 import json
 
@@ -18,20 +18,31 @@ def _producer():
                          value_serializer=lambda v: json.dumps(v).encode("utf-8"))
 
 @app.post("/trigger")
-async def trigger_window_loader():
-    return start()
+async def trigger_window_loader(payload: dict = {}):
+    source = payload.get("source")
+    if not source:
+        raise HTTPException(status_code=400, detail="missing 'source'")
+    path = f"/app/data/{source}"
+    return start(path)
 
-@app.post("/start")
-def start():
-    df = pd.read_parquet(DATA_PATH) if DATA_PATH.endswith(".parquet") else pd.read_csv(DATA_PATH)
+
+def start(path: str):
+    try:
+        if not os.path.exists(path):
+            raise FileNotFoundError(path)
+        df = pd.read_parquet(path) if path.endswith(".parquet") else pd.read_csv(path)
+    except Exception as e:
+        # Siempre devuelve JSON para que el orchestrator no casque con r.json()
+        raise HTTPException(status_code=400, detail={"error": str(e), "path": path})
+
     p = _producer()
-    for i, row in df.iterrows():
+    for _, row in df.iterrows():
         msg = row.to_dict()
         p.send(TOPIC_RAW, msg)
-        p.send(TOPIC_AGENT_IN, msg)  # pasa al agente
+        p.send(TOPIC_AGENT_IN, msg)
         p.flush()
-        time.sleep(0.001)  # simula streaming; ajusta por frecuencia real
-    return {"sent": len(df)}
+        time.sleep(0.001)
+    return {"sent": len(df), "path": path}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8081)

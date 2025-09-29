@@ -30,6 +30,7 @@ services:
       - DOCKER_INFLUXDB_INIT_PASSWORD=admin123
       - DOCKER_INFLUXDB_INIT_ORG=tfg
       - DOCKER_INFLUXDB_INIT_BUCKET=pipeline
+      - DOCKER_INFLUXDB_INIT_RETENTION=168h
       - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=admin_token
     volumes:
       - influxdb_data:/var/lib/influxdb2
@@ -42,9 +43,8 @@ services:
       - KAFKA_BROKER=kafka:9092
       - TOPIC_RAW=telemetry.raw
       - TOPIC_AGENT_IN=telemetry.agent.in
-      - DATA_PATH=/app/data/simple_window.csv
     volumes:
-      - ../data:/app/data
+      - shared_data:/app/data
     depends_on:
       - kafka
 
@@ -66,16 +66,21 @@ services:
       - kafka
       - influxdb
 
-  window_collector:
+  window_collector:  
     build:
       context: ..
       dockerfile: docker/Dockerfile.window_collector
+    environment:
+      - KAFKA_BROKER=kafka:9092
+      - TOPIC_AGENT_OUT=telemetry.agent.out
     ports:
       - "8082:8082"
     depends_on:
       - kafka
     networks:
       - default
+    volumes:
+      - shared_data:/app/data
 
   orchestrator:
     build:
@@ -86,11 +91,13 @@ services:
     depends_on:
       - window_loader
       - agent
-      - window_collector   
+      - window_collector
     networks:
-      - default             
-
+      - default
+    volumes:
+      - shared_data:/app/data
 
 volumes:
   kafka_data:
   influxdb_data:
+  shared_data:

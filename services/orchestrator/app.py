@@ -40,8 +40,13 @@ async def run_window():
     async with httpx.AsyncClient() as client:
         await client.post("http://window_collector:8082/reset")
         # dispara el loader
-        r = await client.post("http://window_loader:8081/trigger", json={"source":"uploaded"})
-        return {"triggered": True, "loader_response": r.json()}
+        r = await client.post("http://window_loader:8081/trigger", json={"source":"uploaded.csv"})
+        try:
+            loader_response = r.json()
+        except Exception:
+            loader_response = {"raw": r.text, "note": "loader no devolvió JSON"}
+        return {"triggered": r.status_code == 200, "status_code": r.status_code, "loader_response": loader_response}
+
 
 @app.get("/api/flush")
 async def flush():
