@@ -68,32 +68,22 @@ def flush():
         snapshot = list(_last_by_key.values())
 
     df = pd.DataFrame(snapshot)
+    if df.empty:
+        return {"rows": 0, "path": OUTPATH}
 
-    # Mapea al formato estándar id,timestamp,var si “Input” era CSV
-    if not df.empty and "__src_format" in df.columns and (df["__src_format"] == "csv").any():
-        # Elegimos v1 como “var”
-        select_cols = []
-        if set(["unit_id", "ts", "v1"]).issubset(df.columns):
-            out = df[["unit_id", "ts", "v1"]].rename(columns={
-                "unit_id": "id", "ts": "timestamp", "v1": "var"
-            })
-            # (opcional) ordenar por clave
-            out = out.sort_values(["id", "timestamp"])
-            out.to_csv(OUTPATH.replace(".parquet", ".csv"), index=False)
-            return {"rows": len(out), "path": OUTPATH.replace(".parquet", ".csv")}
-        # Si no tenemos ese layout, caemos a la salida genérica abajo
+    # detectar formato original
+    ext = ".parquet"
+    if "__src_format" in df.columns:
+        if (df["__src_format"] == "csv").any():
+            ext = ".csv"
 
-    # SALIDA GENÉRICA (igual que antes)
-    if not df.empty:
-        if OUTPATH.endswith(".parquet"):
-            df.to_parquet(OUTPATH, index=False)
-        elif OUTPATH.endswith(".csv"):
-            df.to_csv(OUTPATH, index=False)
-        else:
-            df.to_json(OUTPATH, orient="records", lines=True)
+    out_path = OUTPATH.replace(".parquet", ext)
+    if ext == ".csv":
+        df.to_csv(out_path, index=False)
+    else:
+        df.to_parquet(out_path, index=False)
 
-    return {"rows": len(df), "path": OUTPATH}
-
+    return {"rows": len(df), "path": out_path}
 
 
 if __name__ == "__main__":

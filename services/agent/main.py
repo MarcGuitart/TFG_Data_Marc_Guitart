@@ -38,6 +38,16 @@ client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
 delete_api = client.delete_api()
 write_api = client.write_api(write_options=SYNCHRONOUS)
 
+def parse_or_now(ts_str):
+    try:
+        ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+        # Corrige al día de hoy, misma hora/min/seg
+        today = datetime.utcnow().date()
+        ts = datetime.combine(today, ts.time())
+        return ts
+    except:
+        return datetime.utcnow()
+
 def enforce_cap_per_unit():
     q = client.query_api()
     flux = f'''
@@ -68,7 +78,6 @@ from datetime import datetime
 
 def write_timeseries(rec):
     unit = rec.get("unit_id") or rec.get("id") or "unknown"
-    ts = rec.get("ts") or rec.get("timestamp")
 
     p = Point("telemetry").tag("unit", unit)
 
@@ -80,18 +89,11 @@ def write_timeseries(rec):
             except:
                 pass
 
-    # Manejo correcto del timestamp
-    if ts:
-        try:
-            if isinstance(ts, str):
-                # Si viene como "2024-01-01 00:14:41"
-                ts = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
-            else:
-                # Si viene como número epoch
-                ts = datetime.fromtimestamp(float(ts))
-            p = p.time(ts, WritePrecision.S)
-        except Exception as e:
-            print(f"[agent] error parseando timestamp {ts}: {e}")
+    # Forzar timestamp actual (no parsear el campo timestamp del mensaje)
+    ts_str = rec.get("timestamp")
+    ts = parse_or_now(ts_str)
+    p = p.time(ts, WritePrecision.S)
+
 
     write_api.write(bucket=INFLUX_BUCKET, record=p)
 

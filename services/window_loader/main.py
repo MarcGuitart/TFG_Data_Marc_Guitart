@@ -10,6 +10,7 @@ TOPIC_RAW = os.getenv("TOPIC_RAW", "telemetry.raw")
 TOPIC_AGENT_IN = os.getenv("TOPIC_AGENT_IN", "telemetry.agent.in")
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "1"))
 DATA_PATH = os.getenv("DATA_PATH", "/app/data/sample_window.parquet")
+DATA_DIR = "/app/data"
 
 app = FastAPI()
 
@@ -25,24 +26,35 @@ async def trigger_window_loader(payload: dict = {}):
     path = f"/app/data/{source}"
     return start(path)
 
-
 def start(path: str):
-    try:
-        if not os.path.exists(path):
-            raise FileNotFoundError(path)
-        df = pd.read_parquet(path) if path.endswith(".parquet") else pd.read_csv(path)
-    except Exception as e:
-        # Siempre devuelve JSON para que el orchestrator no casque con r.json()
-        raise HTTPException(status_code=400, detail={"error": str(e), "path": path})
+    print(f"[loader] intentando abrir {path}")
+    print(f"[loader] contenido de /app/data: {os.listdir('/app/data')}")
+    
+    ext = os.path.splitext(path)[-1].lower()
 
-    p = _producer()
+    if ext == ".csv":
+        df = pd.read_csv(path)
+    elif ext == ".parquet":
+        df = pd.read_parquet(path)
+    else:
+        raise ValueError(f"Formato no soportado: {ext}")
+
+    # anotamos el formato en el dataframe
+    df["__src_format"] = "csv" if ext == ".csv" else "parquet"
+
+    # produce a Kafka
+    producer = _producer()
     for _, row in df.iterrows():
-        msg = row.to_dict()
-        p.send(TOPIC_RAW, msg)
-        p.send(TOPIC_AGENT_IN, msg)
-        p.flush()
-        time.sleep(0.001)
-    return {"sent": len(df), "path": path}
+        record = row.to_dict()
+        producer.send(TOPIC_AGENT_IN, record)
+    producer.flush()
 
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8081)
+    # salida en el mismo formato
+    output_path = os.path.join(DATA_DIR, f"processed_window{ext}")
+    if ext == ".csv":
+        df.to_csv(output_path, index=False)
+    else:
+        df.to_parquet(output_path, index=False)
+
+    return {"rows": len(df), "path": output_path}
+
