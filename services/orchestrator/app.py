@@ -1,81 +1,112 @@
-
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import FastAPI, UploadFile, File
-import aiofiles, os, httpx
+from fastapi import FastAPI
+from fastapi.responses import PlainTextResponse
+import httpx, requests, time, os
+from fastapi import UploadFile, File
+import aiofiles
 from dotenv import load_dotenv
-import os, requests
 
-try:
-    from metrics import METRICS
-except Exception:
-    METRICS = None
+# === METRICS STATE ===
+start_time = time.time()
+points_written = 0
+last_flush_rows = 0
 
-LOADER_URL = os.getenv("LOADER_URL", "http://window_loader:8081/start")
-COLLECTOR_URL = os.getenv("COLLECTOR_URL", "http://window_collector:8082/reset")
+# === CONFIG ===
 load_dotenv("config/app.env")
+LOADER_URL = os.getenv("LOADER_URL", "http://window_loader:8081/trigger")
+COLLECTOR_URL = os.getenv("COLLECTOR_URL", "http://window_collector:8082/reset")
+COLLECTOR_FLUSH = os.getenv("COLLECTOR_FLUSH", "http://window_collector:8082/flush")
 
+# === APP ===
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  
+    allow_origins=["http://localhost:5173"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
 DATA_DIR = "/app/data"
 os.makedirs(DATA_DIR, exist_ok=True)
+
 
 @app.post("/api/upload_csv")
 async def upload_csv(file: UploadFile = File(...)):
     path = os.path.join(DATA_DIR, "uploaded.csv")
-    async with aiofiles.open(path, "wb") as f:
+    async with aiofiles.open(path, "wb") as out_file:
         content = await file.read()
-        await f.write(content)
+        await out_file.write(content)
     return {"saved": True, "path": path}
 
-@app.post("/api/run_window")
-async def run_window():
-    # reset collector
-    async with httpx.AsyncClient() as client:
-        await client.post("http://window_collector:8082/reset")
-        # dispara el loader
-        r = await client.post("http://window_loader:8081/trigger", json={"source":"uploaded.csv"})
-        try:
-            loader_response = r.json()
-        except Exception:
-            loader_response = {"raw": r.text, "note": "loader no devolvió JSON"}
-        return {"triggered": r.status_code == 200, "status_code": r.status_code, "loader_response": loader_response}
 
+@app.post("/api/run_window")
+def run_window():
+    global last_flush_rows
+    try:
+        r = requests.post(LOADER_URL, json={"source": "uploaded.csv"})
+        r.raise_for_status()
+        loader_response = r.json()
+
+        # consultar collector
+        try:
+            r2 = requests.get(COLLECTOR_FLUSH, timeout=5)
+            if r2.ok:
+                data = r2.json()
+                last_flush_rows = data.get("rows", 0)
+        except Exception as e:
+            print(f"[orchestrator] error al consultar collector: {e}")
+
+        return {"triggered": True, "status_code": 200, "loader_response": loader_response}
+    except Exception as e:
+        return {"triggered": False, "status_code": 500, "error": str(e)}
 
 @app.get("/api/flush")
 async def flush():
     async with httpx.AsyncClient() as client:
-        r = await client.get("http://window_collector:8082/flush")
+        r = await client.get(COLLECTOR_FLUSH)
         return r.json()
 
 @app.get("/health")
 def health():
-    return {"status":"ok"}
+    return {"status": "ok"}
+
+@app.get("/metrics/prometheus")
+def metrics_prometheus():
+    uptime = int(time.time() - start_time)
+    return PlainTextResponse(
+        f"uptime_sec {uptime}\n"
+        f"points_written {points_written}\n"
+        f"last_flush_rows {last_flush_rows}\n"
+    )
 
 @app.get("/metrics")
 def metrics():
-    return METRICS.as_dict() if METRICS else {"status":"no-metrics"}
+    uptime = int(time.time() - start_time)
+    return {
+        "uptime_sec": uptime,
+        "points_written": points_written,
+        "last_flush_rows": last_flush_rows,
+    }
 
 @app.post("/trigger")
 def trigger():
-    # reset collector (best-effort)
+    # reset collector
     try:
         requests.post(COLLECTOR_URL, timeout=5)
-    except Exception as e:
-        pass  # o guarda el error si te interesa
+    except Exception:
+        pass
 
     try:
-        r = requests.post(LOADER_URL, timeout=5)
+        r = requests.post(LOADER_URL, json={"source": "uploaded.csv"}, timeout=5)
         try:
             payload = r.json()
         except Exception:
             payload = {"raw": r.text, "note": "loader no devolvió JSON"}
-        return {"status": "ok", "triggered": True, "loader_status_code": r.status_code, "loader_response": payload}
+        return {
+            "status": "ok",
+            "triggered": True,
+            "loader_status_code": r.status_code,
+            "loader_response": payload,
+        }
     except Exception as e:
         return {"status": "error", "triggered": False, "message": str(e)}
