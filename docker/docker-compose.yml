@@ -73,6 +73,7 @@ services:
     environment:
       - KAFKA_BROKER=kafka:9092
       - TOPIC_AGENT_OUT=telemetry.agent.out
+      - DEDUP_KEY=timestamp,id
     ports:
       - "8082:8082"
     depends_on:
@@ -81,6 +82,7 @@ services:
       - default
     volumes:
       - shared_data:/app/data
+    restart: always
 
   orchestrator:
     build:

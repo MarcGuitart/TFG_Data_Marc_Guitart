@@ -20,21 +20,28 @@ def start_bg():
     threading.Thread(target=run_consumer, daemon=True).start()
 
 def run_consumer():
-    consumer = KafkaConsumer(
-        TOUT,
-        bootstrap_servers=BROKER,
-        value_deserializer=lambda v: json.loads(v.decode("utf-8")),
-        auto_offset_reset="earliest",
-        enable_auto_commit=True,
-        group_id="collector-v1",
-    )
+    while True:
+        try:
+            consumer = KafkaConsumer(
+                TOUT,
+                bootstrap_servers=BROKER,
+                value_deserializer=lambda v: json.loads(v.decode("utf-8")),
+                auto_offset_reset="earliest",
+                enable_auto_commit=True,
+                group_id="collector-v1",
+            )
+            break
+        except Exception as e:
+            print(f"[collector] esperando Kafka {BROKER} ... {e}")
+            time.sleep(2)
+
     producer = KafkaProducer(
         bootstrap_servers=BROKER,
         value_serializer=lambda v: json.dumps(v).encode("utf-8"),
     )
 
     # Campos de clave para deduplicar (orden estable)
-    key_fields = [s.strip() for s in os.getenv("DEDUP_KEY", "ts,unit_id").split(",") if s.strip()]
+    key_fields = [s.strip() for s in os.getenv("DEDUP_KEY", "timestamp,id").split(",") if s.strip()]
 
     for msg in consumer:
         rec = msg.value

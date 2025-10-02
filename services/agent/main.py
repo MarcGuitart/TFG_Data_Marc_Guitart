@@ -128,6 +128,9 @@ def main():
                     rec["v1"] = round(float(rec["v1"]) * 1.1, 6)
                 except:
                     pass
+            # Normalizar campo timestamp -> ts para el collector
+            if "timestamp" in rec and "ts" not in rec:
+                rec["ts"] = rec["timestamp"]
             producer.send(TOUT, rec)
 
 if __name__ == "__main__":
