@@ -2,12 +2,15 @@ import os, json, threading
 import pandas as pd
 from kafka import KafkaConsumer, KafkaProducer
 from fastapi import FastAPI
+import time
 import uvicorn
+import json
 
 BROKER = os.getenv("KAFKA_BROKER", "kafka:9092")
 TOUT = os.getenv("TOPIC_AGENT_OUT", "telemetry.agent.out")
 TPROC = os.getenv("TOPIC_PROCESSED", "telemetry.processed")
 OUTPATH = os.getenv("OUTPUT_PATH", "/app/data/processed_window.parquet")
+os.makedirs(os.path.dirname(OUTPATH), exist_ok=True)
 
 app = FastAPI()
 _buffer = []
@@ -19,24 +22,33 @@ def start_bg():
     threading.Thread(target=run_consumer, daemon=True).start()
 
 def run_consumer():
-    consumer = KafkaConsumer(
-        TOUT,
-        bootstrap_servers=BROKER,
-        value_deserializer=lambda v: json.loads(v.decode("utf-8")),
-        auto_offset_reset="earliest",
-        enable_auto_commit=True,
-        group_id="collector-v1",
-    )
+    while True:
+        try:
+            consumer = KafkaConsumer(
+                "telemetry.agent.out",
+                bootstrap_servers="kafka:9092",
+                auto_offset_reset="earliest",
+                enable_auto_commit=True,
+                group_id="collector-v1"
+            )
+            break
+        except:
+            print("[collector] Kafka no disponible, reintentando...")
+            time.sleep(2)
+
+
     producer = KafkaProducer(
         bootstrap_servers=BROKER,
         value_serializer=lambda v: json.dumps(v).encode("utf-8"),
     )
 
     # Campos de clave para deduplicar (orden estable)
-    key_fields = [s.strip() for s in os.getenv("DEDUP_KEY", "ts,unit_id").split(",") if s.strip()]
+    key_fields = [s.strip() for s in os.getenv("DEDUP_KEY", "timestamp,id").split(",") if s.strip()]
 
     for msg in consumer:
-        rec = msg.value
+        # msg.value llega en bytes → decodifica primero
+        rec = json.loads(msg.value.decode("utf-8"))
+
         # Publica en 'telemetry.processed' como “sink” intermedio (opcional)
         producer.send(TPROC, rec)
 
@@ -44,6 +56,11 @@ def run_consumer():
         k = tuple(rec.get(f) for f in key_fields)
         with _lock:
             _last_by_key[k] = rec
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 
 
 @app.post("/reset")
@@ -63,15 +80,22 @@ def flush():
         snapshot = list(_last_by_key.values())
 
     df = pd.DataFrame(snapshot)
-    if not df.empty:
-        if OUTPATH.endswith(".parquet"):
-            df.to_parquet(OUTPATH, index=False)
-        elif OUTPATH.endswith(".csv"):
-            df.to_csv(OUTPATH, index=False)
-        else:
-            df.to_json(OUTPATH, orient="records", lines=True)
+    if df.empty:
+        return {"rows": 0, "path": OUTPATH}
 
-    return {"rows": len(df), "path": OUTPATH}
+    # detectar formato original
+    ext = ".parquet"
+    if "__src_format" in df.columns:
+        if (df["__src_format"] == "csv").any():
+            ext = ".csv"
+
+    out_path = OUTPATH.replace(".parquet", ext)
+    if ext == ".csv":
+        df.to_csv(out_path, index=False)
+    else:
+        df.to_parquet(out_path, index=False)
+
+    return {"rows": len(df), "path": out_path}
 
 
 if __name__ == "__main__":
