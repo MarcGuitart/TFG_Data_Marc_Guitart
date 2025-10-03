@@ -1,0 +1,13 @@
+FROM python:3.11
+WORKDIR /app
+
+# Instala dependencias
+COPY services/agent/requirements.txt requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install influxdb-client
+
+# Copia el código del agente
+COPY services/agent/ .
+
+# Arranca el agente (no FastAPI, solo el loop)
+CMD ["python", "main.py"]

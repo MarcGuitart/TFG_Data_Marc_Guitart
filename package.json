@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "np": "^10.2.0",
+    "numpy": "^0.0.1",
+    "pandas": "^0.0.3",
+    "papaparse": "^5.5.3",
+    "recharts": "^3.2.1"
+  }
+}
