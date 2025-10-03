@@ -2,7 +2,9 @@ import os, json, threading
 import pandas as pd
 from kafka import KafkaConsumer, KafkaProducer
 from fastapi import FastAPI
+import time
 import uvicorn
+import json
 
 BROKER = os.getenv("KAFKA_BROKER", "kafka:9092")
 TOUT = os.getenv("TOPIC_AGENT_OUT", "telemetry.agent.out")
@@ -23,17 +25,17 @@ def run_consumer():
     while True:
         try:
             consumer = KafkaConsumer(
-                TOUT,
-                bootstrap_servers=BROKER,
-                value_deserializer=lambda v: json.loads(v.decode("utf-8")),
+                "telemetry.agent.out",
+                bootstrap_servers="kafka:9092",
                 auto_offset_reset="earliest",
                 enable_auto_commit=True,
-                group_id="collector-v1",
+                group_id="collector-v1"
             )
             break
-        except Exception as e:
-            print(f"[collector] esperando Kafka {BROKER} ... {e}")
+        except:
+            print("[collector] Kafka no disponible, reintentando...")
             time.sleep(2)
+
 
     producer = KafkaProducer(
         bootstrap_servers=BROKER,
@@ -44,7 +46,9 @@ def run_consumer():
     key_fields = [s.strip() for s in os.getenv("DEDUP_KEY", "timestamp,id").split(",") if s.strip()]
 
     for msg in consumer:
-        rec = msg.value
+        # msg.value llega en bytes → decodifica primero
+        rec = json.loads(msg.value.decode("utf-8"))
+
         # Publica en 'telemetry.processed' como “sink” intermedio (opcional)
         producer.send(TPROC, rec)
 
@@ -52,6 +56,7 @@ def run_consumer():
         k = tuple(rec.get(f) for f in key_fields)
         with _lock:
             _last_by_key[k] = rec
+
 
 @app.get("/health")
 def health():

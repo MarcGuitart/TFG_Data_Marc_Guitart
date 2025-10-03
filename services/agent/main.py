@@ -4,6 +4,9 @@ from influxdb_client import InfluxDBClient, Point, WritePrecision
 from influxdb_client.client.write_api import SYNCHRONOUS
 from influxdb_client.client.delete_api import DeleteApi
 from datetime import datetime, timedelta
+import threading
+import logging
+logging.basicConfig(level=logging.INFO)
 
 
 # === CONFIG ===
@@ -17,6 +20,17 @@ INFLUX_TOKEN = os.getenv("INFLUX_TOKEN", "admin_token")
 INFLUX_ORG = os.getenv("INFLUX_ORG", "tfg")
 INFLUX_BUCKET = os.getenv("INFLUX_BUCKET", "pipeline")
 MAX_ROWS_PER_UNIT = int(os.getenv("MAX_ROWS_PER_UNIT", "1000"))
+
+def auto_purge():
+    while True:
+        try:
+            enforce_cap_per_unit()
+        except Exception as e:
+            print("[agent] error en auto-purge:", e)
+        time.sleep(300)  # cada 5 min
+
+# al final de main():
+threading.Thread(target=auto_purge, daemon=True).start()
 
 # --- esperar a Kafka ---
 def wait_for_kafka(broker: str, timeout=120):
@@ -78,16 +92,23 @@ from datetime import datetime
 
 def write_timeseries(rec):
     unit = rec.get("unit_id") or rec.get("id") or "unknown"
+    print(f"[agent] escribiendo en Influx unit={unit}")
 
     p = Point("telemetry").tag("unit", unit)
 
     # Añadimos las métricas numéricas
+    fields_added = False
     for f in ["v1", "v2", "v3", "v4", "v5", "var"]:
         if f in rec:
             try:
                 p = p.field(f, float(rec[f]))
+                fields_added = True
             except:
                 pass
+
+    # Si no había ninguno de esos campos, escribe aunque sea un flag
+    if not fields_added:
+        p = p.field("dummy", 1.0)
 
     # Forzar timestamp actual (no parsear el campo timestamp del mensaje)
     ts_str = rec.get("timestamp")
@@ -115,8 +136,12 @@ def main():
 
     print(f"[agent] escuchando {TIN} y publicando en {TOUT}")
     for msg in consumer:
-        rec = msg.value
-        print(f"[agent] recibido: {rec}")
+        try:
+            rec = msg.value
+            print(f"[agent] recibido: {rec}")
+        except Exception as e:
+            print("[agent] error deserializando:", e, msg.value)
+            continue
         try:
             write_timeseries(rec)
         except Exception as e:
@@ -134,4 +159,6 @@ def main():
             producer.send(TOUT, rec)
 
 if __name__ == "__main__":
+    print(f"[agent] conectado a Influx {INFLUX_URL}, bucket={INFLUX_BUCKET}, org={INFLUX_ORG}")
+    print(f"[agent] escuchando {TIN} y publicando en {TOUT}")
     main()
