@@ -1,13 +1,8 @@
 FROM python:3.11
+ENV PYTHONUNBUFFERED=1
 WORKDIR /app
-
-# Instala dependencias
-COPY services/agent/requirements.txt requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install influxdb-client
-
-# Copia el código del agente
-COPY services/agent/ .
-
-# Arranca el agente (no FastAPI, solo el loop)
-CMD ["python", "main.py"]
+COPY services/agent/ /app/
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir influxdb-client
+RUN apt-get update && apt-get install -y netcat-openbsd net-tools iputils-ping
+CMD ["python","-u","main.py"]

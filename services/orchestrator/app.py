@@ -5,6 +5,7 @@ import httpx, requests, time, os
 from fastapi import UploadFile, File
 import aiofiles
 from dotenv import load_dotenv
+from fastapi import HTTPException
 
 # === METRICS STATE ===
 start_time = time.time()
@@ -12,8 +13,9 @@ points_written = 0
 last_flush_rows = 0
 
 # === CONFIG ===
+MODEL_PATH = os.getenv("MODEL_PATH", "/app/data/model_naive_daily.json")
 load_dotenv("config/app.env")
-LOADER_URL = os.getenv("LOADER_URL", "http://window_loader:8081/trigger")
+LOADER_URL = os.getenv("LOADER_URL", "http://window_loader:8083/trigger")
 COLLECTOR_URL = os.getenv("COLLECTOR_URL", "http://window_collector:8082/reset")
 COLLECTOR_FLUSH = os.getenv("COLLECTOR_FLUSH", "http://window_collector:8082/flush")
 
@@ -78,6 +80,14 @@ def metrics_prometheus():
         f"points_written {points_written}\n"
         f"last_flush_rows {last_flush_rows}\n"
     )
+
+@app.get("/api/model/export")
+def model_export():
+    try:
+        with open(MODEL_PATH, "r") as f:
+            return {"model": json.load(f)}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="model not found")
 
 @app.get("/metrics")
 def metrics():
