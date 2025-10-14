@@ -1,40 +1,67 @@
 services:
   zookeeper:
     image: confluentinc/cp-zookeeper:7.2.1
+    container_name: zookeeper
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
     ports:
       - "2181:2181"
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tfg_net
+
 
   kafka:
     image: confluentinc/cp-kafka:7.2.1
+    container_name: kafka
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_healthy
     ports:
       - "9092:9092"
+      - "29092:29092"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-    volumes:
-      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - tfg_net
+
 
   influxdb:
     image: influxdb:2.7
+    container_name: docker-influxdb-1
     ports:
       - "8086:8086"
     environment:
-      - DOCKER_INFLUXDB_INIT_MODE=setup
-      - DOCKER_INFLUXDB_INIT_USERNAME=admin
-      - DOCKER_INFLUXDB_INIT_PASSWORD=admin123
-      - DOCKER_INFLUXDB_INIT_ORG=tfg
-      - DOCKER_INFLUXDB_INIT_BUCKET=pipeline
-      - DOCKER_INFLUXDB_INIT_RETENTION=168h
-      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=admin_token
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: admin123
+      DOCKER_INFLUXDB_INIT_ORG: tfg
+      DOCKER_INFLUXDB_INIT_BUCKET: pipeline
+      DOCKER_INFLUXDB_INIT_RETENTION: 168h
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: admin_token
     volumes:
       - influxdb_data:/var/lib/influxdb2
+    networks:
+      tfg_net:
+        aliases:
+          - influxdb
+
 
   window_loader:
     build:
@@ -45,9 +72,14 @@ services:
       - TOPIC_RAW=telemetry.raw
       - TOPIC_AGENT_IN=telemetry.agent.in
     volumes:
-      - shared_data:/app/data
+      - ../data:/app/data
     depends_on:
       - kafka
+    networks:
+      - tfg_net
+    ports:
+      - "8083:8083"
+
 
   agent:
     build:
@@ -64,9 +96,22 @@ services:
       - INFLUX_BUCKET=pipeline
       - MAX_ROWS_PER_UNIT=5
       - RETENTION_HOURS=24
+      - PRED_HORIZON_MIN=1
+      - MODEL_CLASS=agent.model:NaiveDailyProfileModel
+      - MODEL_PATH=/app/data/model_daily.json
+      - SLOT_MINUTES=30
+      - PRED_HORIZON_MIN=1
+      - LEARN_LOOKBACK_DAYS=30
+      - LEARN_PERIOD_SEC=86400
     depends_on:
-      - kafka
-      - influxdb
+      kafka:
+        condition: service_healthy
+      influxdb:
+        condition: service_started
+    restart: always
+    networks:
+      - tfg_net
+
 
   window_collector:  
     build:
@@ -81,9 +126,9 @@ services:
     depends_on:
       - kafka
     networks:
-      - default
+      - tfg_net
     volumes:
-      - shared_data:/app/data
+      - ../data:/app/data
     restart: always
 
   orchestrator:
@@ -97,11 +142,19 @@ services:
       - agent
       - window_collector
     networks:
-      - default
+      - tfg_net
     volumes:
-      - shared_data:/app/data
+      - ../data:/app/data
+      
+
 
 volumes:
   kafka_data:
   influxdb_data:
   shared_data:
+    driver: local
+  
+networks:
+  tfg_net:
+    name: tfg_net
+    driver: bridge
