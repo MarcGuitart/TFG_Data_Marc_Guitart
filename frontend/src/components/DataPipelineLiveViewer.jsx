@@ -11,9 +11,9 @@ const endpoints = {
 
 const triggerPipeline = async () => {
   try {
-    const res = await fetch('http://localhost:8081/start', { method: 'POST' });
+    const res = await fetch('http://localhost:8081/api/run_window', { method: 'POST' });
     const json = await res.json();
-    alert(`Datos enviados: ${json.sent}`);
+    alert(`Pipeline ejecutado correctamente: ${json.loader_response?.rows || 0} filas procesadas`);
   } catch (err) {
     alert("Error al iniciar el pipeline");
     console.error(err);
