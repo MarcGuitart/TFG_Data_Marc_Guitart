@@ -3,3 +3,5 @@ uvicorn==0.30.0
 requests==2.32.3
 aiofiles
 httpx
+python-dotenv
+influxdb-client

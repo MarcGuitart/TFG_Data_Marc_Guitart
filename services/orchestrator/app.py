@@ -6,11 +6,20 @@ from fastapi import UploadFile, File
 import aiofiles
 from dotenv import load_dotenv
 from fastapi import HTTPException
+from influxdb_client import InfluxDBClient
 
 # === METRICS STATE ===
 start_time = time.time()
 points_written = 0
 last_flush_rows = 0
+
+# === INFLUXDB CONFIG ===
+
+INFLUX_URL = os.getenv("INFLUX_URL", "http://influxdb:8086")
+INFLUX_TOKEN = os.getenv("INFLUX_TOKEN", "admin_token")
+INFLUX_ORG = os.getenv("INFLUX_ORG", "tfg")
+INFLUX_BUCKET = os.getenv("INFLUX_BUCKET","pipeline")
+
 
 # === CONFIG ===
 MODEL_PATH = os.getenv("MODEL_PATH", "/app/data/model_naive_daily.json")
@@ -30,6 +39,35 @@ app.add_middleware(
 
 DATA_DIR = "/app/data"
 os.makedirs(DATA_DIR, exist_ok=True)
+
+@app.get("/api/series")
+def get_series():
+    """
+    Devuelve las series recientes desde InfluxDB:
+    - 'var'   → valores reales del CSV
+    - 'prediction' → valores generados por el agente
+    """
+    client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
+    query_api = client.query_api()
+
+    flux = f"""
+    from(bucket:"{INFLUX_BUCKET}")
+      |> range(start: -6h)
+      |> filter(fn: (r) => r._measurement == "telemetry" and (r._field == "var" or r._field == "prediction"))
+      |> keep(columns: ["_time", "_field", "_value"])
+    """
+
+    tables = query_api.query(flux)
+    data = {"var": [], "prediction": []}
+
+    for table in tables:
+        for record in table.records:
+            ts = record.get_time().isoformat()
+            val = float(record.get_value())
+            field = record.get_field()
+            data[field].append({"ts": ts, "value": val})
+
+    return data
 
 
 @app.post("/api/upload_csv")
