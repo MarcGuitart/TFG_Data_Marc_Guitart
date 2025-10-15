@@ -3,11 +3,18 @@ import pandas as pd
 from kafka import KafkaConsumer, KafkaProducer
 from fastapi import FastAPI
 import uvicorn
+from influxdb_client import InfluxDBClient, Point, WritePrecision
 
+# === ENV VARS ===
 BROKER = os.getenv("KAFKA_BROKER", "kafka:9092")
 TOUT = os.getenv("TOPIC_AGENT_OUT", "telemetry.agent.out")
 TPROC = os.getenv("TOPIC_PROCESSED", "telemetry.processed")
 OUTPATH = os.getenv("OUTPUT_PATH", "/app/data/processed_window.parquet")
+INFLUX_URL = os.getenv("INFLUX_URL", "http://influxdb:8086")
+INFLUX_TOKEN = os.getenv("INFLUX_TOKEN", "admin_token")
+INFLUX_ORG = os.getenv("INFLUX_ORG", "tfg")
+INFLUX_BUCKET = os.getenv("INFLUX_BUCKET", "pipeline")
+
 os.makedirs(os.path.dirname(OUTPATH), exist_ok=True)
 
 app = FastAPI()
@@ -30,6 +37,39 @@ def wait_for_kafka(broker="kafka:9092", timeout=120):
     raise RuntimeError(f"[collector] ❌ Kafka no disponible en {broker}")
 
 
+def write_to_influx(rec):
+    """Guarda un registro individual en InfluxDB (var y predicción si existen)."""
+    try:
+        with InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG) as client:
+            write_api = client.write_api(write_options=None)
+            unit = rec.get("id", "unknown")
+
+            # Dato observado
+            if "var" in rec:
+                p = (
+                    Point("telemetry")
+                    .tag("id", unit)
+                    .field("var", float(rec["var"]))
+                    .time(rec.get("timestamp"), WritePrecision.NS)
+                )
+                write_api.write(bucket=INFLUX_BUCKET, record=p)
+                print(f"[collector] 🟦 var → {unit} {rec.get('timestamp')} = {rec['var']}")
+
+            # Predicción (campo yhat o prediction)
+            if "yhat" in rec:
+                p = (
+                    Point("telemetry")
+                    .tag("id", unit)
+                    .field("prediction", float(rec["yhat"]))
+                    .time(rec.get("ts_pred", rec.get("timestamp")), WritePrecision.NS)
+                )
+                write_api.write(bucket=INFLUX_BUCKET, record=p)
+                print(f"[collector] 🟨 prediction → {unit} {rec.get('ts_pred')} = {rec['yhat']}")
+
+    except Exception as e:
+        print(f"[collector] ❌ Error escribiendo en Influx: {e}")
+
+
 def run_consumer():
     wait_for_kafka(BROKER)
 
@@ -40,10 +80,10 @@ def run_consumer():
                 bootstrap_servers=BROKER,
                 auto_offset_reset="earliest",
                 enable_auto_commit=False,
-                group_id="collector-v3"
+                group_id="collector-v4"
             )
             consumer.poll(timeout_ms=1000)
-            consumer.seek_to_beginning()
+            consumer.seek_to_end()
             print(f"[collector] ✅ Suscrito a {TOUT}, esperando mensajes...")
 
             producer = KafkaProducer(
@@ -60,13 +100,16 @@ def run_consumer():
                     print("[collector] ❌ Error decoding message:", e)
                     continue
 
-                # Publica en 'telemetry.processed'
+                # Publicar copia procesada
                 producer.send(TPROC, rec)
 
                 # Deduplicación
                 k = tuple(rec.get(f) for f in key_fields)
                 with _lock:
                     _last_by_key[k] = rec
+
+                # Escribir en Influx
+                write_to_influx(rec)
 
                 print(f"[collector] ⚙️ recibido: {k}")
 
