@@ -11,14 +11,58 @@ const endpoints = {
 
 const triggerPipeline = async () => {
   try {
-    const res = await fetch('http://localhost:8081/api/run_window', { method: 'POST' });
+    // 1) Subir el CSV real
+    const fileInput = document.querySelector('input[type="file"]');
+    if (!fileInput || !fileInput.files || !fileInput.files.length) {
+      alert("Por favor selecciona un CSV antes de ejecutar el agente.");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", fileInput.files[0]);
+
+    const up = await fetch("http://localhost:8081/api/upload_csv", {
+      method: "POST",
+      body: formData,
+    });
+    if (!up.ok) {
+      const txt = await up.text().catch(() => "");
+      alert("Falló /api/upload_csv");
+      console.error("upload_csv FAILED", up.status, txt);
+      return;
+    }
+    const upJson = await up.json().catch(() => ({}));
+    console.log("upload_csv OK:", upJson);
+
+    // 2) Ejecutar pipeline (limpia Influx y lanza loader)
+    // DataPipelineLiveViewer.jsx (ya lo tienes casi así)
+    const res = await fetch("http://localhost:8081/api/run_window", { method: "POST" });
+    // 👇 esto muestra predicciones publicadas por el collector (deduplicadas)
+    alert(`Pipeline ejecutado correctamente: ${res.rows_flushed || 0} predicciones generadas`);
+
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      alert("Falló /api/run_window");
+      console.error("run_window FAILED", res.status, txt);
+      return;
+    }
     const json = await res.json();
-    alert(`Pipeline ejecutado correctamente: ${json.loader_response?.rows || 0} filas procesadas`);
+    console.log("run_window OK:", json);
+
+    // Muestra ambos contadores para distinguir
+    const loaderRows = json.loader_response?.rows ?? json.loader_rows ?? 0;
+    const flushed = json.rows_flushed ?? 0;
+    alert(`Loader: ${loaderRows} filas | Predicciones (flush): ${flushed}`);
+
+    // refresca el panel inferior
+    window.dispatchEvent(new Event("pipelineUpdated"));
   } catch (err) {
     alert("Error al iniciar el pipeline");
     console.error(err);
   }
 };
+
+
 
 
 export default function DataPipelineLiveViewer() {

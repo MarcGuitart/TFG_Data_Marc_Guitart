@@ -1,12 +1,10 @@
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import PlainTextResponse
-import httpx, requests, time, os
-from fastapi import UploadFile, File
-import aiofiles
+import httpx, requests, time, os, aiofiles, json
 from dotenv import load_dotenv
-from fastapi import HTTPException
 from influxdb_client import InfluxDBClient
+from datetime import datetime
 
 # === METRICS STATE ===
 start_time = time.time()
@@ -14,12 +12,10 @@ points_written = 0
 last_flush_rows = 0
 
 # === INFLUXDB CONFIG ===
-
 INFLUX_URL = os.getenv("INFLUX_URL", "http://influxdb:8086")
 INFLUX_TOKEN = os.getenv("INFLUX_TOKEN", "admin_token")
 INFLUX_ORG = os.getenv("INFLUX_ORG", "tfg")
-INFLUX_BUCKET = os.getenv("INFLUX_BUCKET","pipeline")
-
+INFLUX_BUCKET = os.getenv("INFLUX_BUCKET", "pipeline")
 
 # === CONFIG ===
 MODEL_PATH = os.getenv("MODEL_PATH", "/app/data/model_naive_daily.json")
@@ -28,7 +24,7 @@ LOADER_URL = os.getenv("LOADER_URL", "http://window_loader:8083/trigger")
 COLLECTOR_URL = os.getenv("COLLECTOR_URL", "http://window_collector:8082/reset")
 COLLECTOR_FLUSH = os.getenv("COLLECTOR_FLUSH", "http://window_collector:8082/flush")
 
-# === APP ===
+# === APP INIT ===
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
@@ -40,6 +36,9 @@ app.add_middleware(
 DATA_DIR = "/app/data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
+# ============================================================
+#  GET /api/series — devuelve var + prediction desde Influx
+# ============================================================
 @app.get("/api/series")
 def get_series():
     """
@@ -69,25 +68,73 @@ def get_series():
 
     return data
 
-
+# ============================================================
+#  POST /api/upload_csv — guarda CSV subido
+# ============================================================
 @app.post("/api/upload_csv")
 async def upload_csv(file: UploadFile = File(...)):
+    """Guarda el CSV subido en /app/data/uploaded.csv"""
     path = os.path.join(DATA_DIR, "uploaded.csv")
     async with aiofiles.open(path, "wb") as out_file:
         content = await file.read()
         await out_file.write(content)
+    print(f"[orchestrator] CSV recibido y guardado en {path}")
     return {"saved": True, "path": path}
+
+from datetime import timedelta
+
+@app.get("/kafka/in")
+def kafka_in():
+    # Si quieres, podrías leer últimos N mensajes de un topic con kafka-python.
+    return {"messages": []}
+
+@app.get("/kafka/out")
+def kafka_out():
+    return {"messages": []}
+
+@app.get("/agent")
+def agent_status():
+    return {"logs": []}
+
+@app.get("/debug/ls")
+def debug_ls():
+    files = []
+    for name in os.listdir("/app/data"):
+        p = os.path.join("/app/data", name)
+        try:
+            st = os.stat(p)
+            files.append({"name": name, "size": st.st_size, "mtime": st.st_mtime})
+        except Exception as e:
+            files.append({"name": name, "error": str(e)})
+    return {"dir": "/app/data", "files": files}
 
 
 @app.post("/api/run_window")
 def run_window():
     global last_flush_rows
     try:
+        # === 🔥 Limpieza completa de datos previos ===
+        client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
+        delete_api = client.delete_api()
+        delete_api.delete(
+            start="1970-01-01T00:00:00Z",
+            stop=(datetime.utcnow() + timedelta(days=1)).isoformat() + "Z",
+            bucket=INFLUX_BUCKET,
+            org=INFLUX_ORG,
+            predicate=""  # vacío = borra todo
+        )
+        print("[orchestrator] bucket limpiado antes de procesar nuevo CSV")
+
+        # === Ejecutar loader y recopilar respuesta ===
         r = requests.post(LOADER_URL, json={"source": "uploaded.csv"})
         r.raise_for_status()
         loader_response = r.json()
 
-        # consultar collector
+        # Esperar a que el collector escriba predicciones nuevas
+        print("[orchestrator] esperando escritura del agente en Influx...")
+        time.sleep(5)
+
+        # Consultar collector
         try:
             r2 = requests.get(COLLECTOR_FLUSH, timeout=5)
             if r2.ok:
@@ -96,10 +143,22 @@ def run_window():
         except Exception as e:
             print(f"[orchestrator] error al consultar collector: {e}")
 
-        return {"triggered": True, "status_code": 200, "loader_response": loader_response}
+        return {
+            "triggered": True,
+            "status_code": 200,
+            "loader_response": loader_response,
+            "loader_rows": loader_response.get("rows"),
+            "rows_flushed": last_flush_rows,
+        }
+
     except Exception as e:
+        print(f"[orchestrator] error en run_window: {e}")
         return {"triggered": False, "status_code": 500, "error": str(e)}
 
+
+# ============================================================
+#  Otros endpoints auxiliares
+# ============================================================
 @app.get("/api/flush")
 async def flush():
     async with httpx.AsyncClient() as client:
@@ -138,7 +197,7 @@ def metrics():
 
 @app.post("/trigger")
 def trigger():
-    # reset collector
+    """Manual trigger: resetea collector y lanza loader"""
     try:
         requests.post(COLLECTOR_URL, timeout=5)
     except Exception:
