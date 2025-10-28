@@ -4,16 +4,13 @@ services:
     container_name: zookeeper
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
-    ports:
-      - "2181:2181"
+    ports: [ "2181:2181" ]
     healthcheck:
       test: ["CMD-SHELL", "nc -z localhost 2181"]
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - tfg_net
-
+    networks: [ tfg_net ]
 
   kafka:
     image: confluentinc/cp-kafka:7.2.1
@@ -21,9 +18,7 @@ services:
     depends_on:
       zookeeper:
         condition: service_healthy
-    ports:
-      - "9092:9092"
-      - "29092:29092"
+    ports: [ "9092:9092", "29092:29092" ]
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
@@ -38,15 +33,12 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-    networks:
-      - tfg_net
-
+    networks: [ tfg_net ]
 
   influxdb:
     image: influxdb:2.7
     container_name: docker-influxdb-1
-    ports:
-      - "8086:8086"
+    ports: [ "8086:8086" ]
     environment:
       DOCKER_INFLUXDB_INIT_MODE: setup
       DOCKER_INFLUXDB_INIT_USERNAME: admin
@@ -59,9 +51,7 @@ services:
       - influxdb_data:/var/lib/influxdb2
     networks:
       tfg_net:
-        aliases:
-          - influxdb
-
+        aliases: [ influxdb ]
 
   window_loader:
     build:
@@ -71,15 +61,15 @@ services:
       - KAFKA_BROKER=kafka:9092
       - TOPIC_RAW=telemetry.raw
       - TOPIC_AGENT_IN=telemetry.agent.in
+      - BATCH_SIZE=1
+      - PLAY_SPEED_MS=0
     volumes:
       - ../data:/app/data
     depends_on:
       - kafka
-    networks:
-      - tfg_net
-    ports:
-      - "8083:8083"
-
+    networks: [ tfg_net ]
+    ports: [ "8083:8083" ]
+    restart: always
 
   agent:
     build:
@@ -99,21 +89,27 @@ services:
       - SLOT_MINUTES=30
       - MODEL_CLASS=agent.model:NaiveDailyProfileModel
       - MODEL_PATH=/app/data/model_daily.json
-      - SLOT_MINUTES=30
       - PRED_HORIZON_MIN=30
       - LEARN_LOOKBACK_DAYS=30
       - LEARN_PERIOD_SEC=86400
+      - HYPERMODEL_CONFIG=/app/hypermodel/model_config.json
+      - HYPERMODEL_DECAY=0.95
+      - HYPERMODEL_W_CAP=10.0
+      - BUFFER_LEN=32
     depends_on:
       kafka:
         condition: service_healthy
       influxdb:
         condition: service_started
+    networks: [ tfg_net ]
+    volumes:
+      - ../data:/app/data
+      - ../hypermodel:/app/hypermodel
+    ports:
+      - "8090:8090"   # opcional (debug)
     restart: always
-    networks:
-      - tfg_net
 
-
-  window_collector:  
+  window_collector:
     build:
       context: ..
       dockerfile: docker/Dockerfile.window_collector
@@ -125,13 +121,11 @@ services:
       - INFLUX_TOKEN=admin_token
       - INFLUX_ORG=tfg
       - INFLUX_BUCKET=pipeline
-    ports:
-      - "8082:8082"
+    ports: [ "8082:8082" ]
     depends_on:
       - kafka
       - influxdb
-    networks:
-      - tfg_net
+    networks: [ tfg_net ]
     volumes:
       - ../data:/app/data
     restart: always
@@ -140,25 +134,30 @@ services:
     build:
       context: ../
       dockerfile: docker/Dockerfile.orchestrator
-    ports:
-      - "8081:8081"
+    ports: [ "8081:8081" ]
     depends_on:
       - window_loader
       - agent
       - window_collector
-    networks:
-      - tfg_net
+    networks: [ tfg_net ]
     volumes:
       - ../data:/app/data
-      
-
+    environment:
+      - INFLUX_URL=http://influxdb:8086
+      - INFLUX_TOKEN=admin_token
+      - INFLUX_ORG=tfg
+      - INFLUX_BUCKET=pipeline
+      - LOADER_URL=http://window_loader:8083/trigger
+      - COLLECTOR_URL=http://window_collector:8082/reset
+      - COLLECTOR_FLUSH=http://window_collector:8082/flush
+    restart: always
 
 volumes:
   kafka_data:
   influxdb_data:
   shared_data:
     driver: local
-  
+
 networks:
   tfg_net:
     name: tfg_net
