@@ -4,7 +4,9 @@ from fastapi.responses import PlainTextResponse
 import httpx, requests, time, os, aiofiles, json
 from dotenv import load_dotenv
 from influxdb_client import InfluxDBClient
-from datetime import datetime
+from datetime import datetime, timedelta
+from fastapi import Query
+
 
 # === METRICS STATE ===
 start_time = time.time()
@@ -28,45 +30,15 @@ COLLECTOR_FLUSH = os.getenv("COLLECTOR_FLUSH", "http://window_collector:8082/flu
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["http://localhost:5173", "http://localhost:5174"], 
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+
 DATA_DIR = "/app/data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# ============================================================
-#  GET /api/series — devuelve var + prediction desde Influx
-# ============================================================
-@app.get("/api/series")
-def get_series():
-    """
-    Devuelve las series recientes desde InfluxDB:
-    - 'var'   → valores reales del CSV
-    - 'prediction' → valores generados por el agente
-    """
-    client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
-    query_api = client.query_api()
-
-    flux = f"""
-    from(bucket:"{INFLUX_BUCKET}")
-      |> range(start: -6h)
-      |> filter(fn: (r) => r._measurement == "telemetry" and (r._field == "var" or r._field == "prediction"))
-      |> keep(columns: ["_time", "_field", "_value"])
-    """
-
-    tables = query_api.query(flux)
-    data = {"var": [], "prediction": []}
-
-    for table in tables:
-        for record in table.records:
-            ts = record.get_time().isoformat()
-            val = float(record.get_value())
-            field = record.get_field()
-            data[field].append({"ts": ts, "value": val})
-
-    return data
 
 # ============================================================
 #  POST /api/upload_csv — guarda CSV subido
@@ -80,8 +52,6 @@ async def upload_csv(file: UploadFile = File(...)):
         await out_file.write(content)
     print(f"[orchestrator] CSV recibido y guardado en {path}")
     return {"saved": True, "path": path}
-
-from datetime import timedelta
 
 @app.get("/kafka/in")
 def kafka_in():
@@ -107,13 +77,56 @@ def debug_ls():
         except Exception as e:
             files.append({"name": name, "error": str(e)})
     return {"dir": "/app/data", "files": files}
+@app.get("/api/series")
+def get_series(
+    id: str | None = Query(default=None),
+    hours: int = Query(default=48, ge=1, le=24*30)
+):
+    def _run_query(tag_filter: str):
+        flux = f'''
+        from(bucket:"{INFLUX_BUCKET}")
+          |> range(start: -{hours}h)
+          |> filter(fn: (r) => r._measurement == "telemetry" and (r._field == "var" or r._field == "prediction"))
+          {tag_filter}
+          |> keep(columns: ["_time","_field","_value"])
+          |> sort(columns: ["_time"])
+        '''
+        tables = q.query(flux)
+        out = {"var": [], "prediction": []}
+        for t in tables:
+            for r in t.records:
+                out[r.get_field()].append({"ts": r.get_time().isoformat(), "value": float(r.get_value())})
+        return out
 
+    client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
+    q = client.query_api()
+
+    data = {}
+    if id:
+        # intenta por 'id' y, por compat, por 'unit'
+        data = _run_query(f'|> filter(fn: (r) => r.id == "{id}" or r.unit == "{id}")')
+
+    # fallback: si está vacío, trae sin filtro
+    if not data or (not data["var"] and not data["prediction"]):
+        data = _run_query("")  # sin filtro
+
+    return data
+
+@app.get("/api/ids")
+def list_ids():
+    flux = f'''
+    import "influxdata/influxdb/schema"
+    schema.tagValues(bucket: "{INFLUX_BUCKET}", tag: "id")
+    '''
+    client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
+    tabs = client.query_api().query(flux)
+    ids = sorted({ r.get_value() for t in tabs for r in t.records if r.get_value() })
+    return {"ids": ids}
 
 @app.post("/api/run_window")
 def run_window():
     global last_flush_rows
     try:
-        # === 🔥 Limpieza completa de datos previos ===
         client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
         delete_api = client.delete_api()
         delete_api.delete(
@@ -121,27 +134,27 @@ def run_window():
             stop=(datetime.utcnow() + timedelta(days=1)).isoformat() + "Z",
             bucket=INFLUX_BUCKET,
             org=INFLUX_ORG,
-            predicate=""  # vacío = borra todo
+            predicate=""
         )
         print("[orchestrator] bucket limpiado antes de procesar nuevo CSV")
 
-        # === Ejecutar loader y recopilar respuesta ===
         r = requests.post(LOADER_URL, json={"source": "uploaded.csv"})
         r.raise_for_status()
         loader_response = r.json()
 
-        # Esperar a que el collector escriba predicciones nuevas
-        print("[orchestrator] esperando escritura del agente en Influx...")
-        time.sleep(5)
-
-        # Consultar collector
-        try:
-            r2 = requests.get(COLLECTOR_FLUSH, timeout=5)
-            if r2.ok:
-                data = r2.json()
-                last_flush_rows = data.get("rows", 0)
-        except Exception as e:
-            print(f"[orchestrator] error al consultar collector: {e}")
+        # da un margen breve a agent->collector->influx (mejor que 5 fijo)
+        for _ in range(6):
+            time.sleep(1)
+            try:
+                r2 = requests.get(COLLECTOR_FLUSH, timeout=3)
+                if r2.ok:
+                    data = r2.json()
+                    last_flush_rows = data.get("rows", 0)
+                # si ya hay algo, salimos antes
+                if last_flush_rows:
+                    break
+            except Exception:
+                pass
 
         return {
             "triggered": True,

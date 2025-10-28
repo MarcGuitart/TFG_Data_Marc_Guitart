@@ -99,6 +99,8 @@ def start(path: str):
     producer = _producer()
     for _, row in df.iterrows():
         record = row.to_dict()
+        # garantiza tipos simples JSON
+        record["var"] = None if pd.isna(record["var"]) else float(record["var"])
         producer.send(TOPIC_AGENT_IN, record)
     producer.flush()
 
