@@ -94,13 +94,13 @@ services:
       - INFLUX_TOKEN=admin_token
       - INFLUX_ORG=tfg
       - INFLUX_BUCKET=pipeline
-      - MAX_ROWS_PER_UNIT=5
+      - MAX_ROWS_PER_UNIT=1000
       - RETENTION_HOURS=24
-      - PRED_HORIZON_MIN=1
+      - SLOT_MINUTES=30
       - MODEL_CLASS=agent.model:NaiveDailyProfileModel
       - MODEL_PATH=/app/data/model_daily.json
       - SLOT_MINUTES=30
-      - PRED_HORIZON_MIN=1
+      - PRED_HORIZON_MIN=30
       - LEARN_LOOKBACK_DAYS=30
       - LEARN_PERIOD_SEC=86400
     depends_on:
@@ -121,10 +121,15 @@ services:
       - KAFKA_BROKER=kafka:9092
       - TOPIC_AGENT_OUT=telemetry.agent.out
       - DEDUP_KEY=timestamp,id
+      - INFLUX_URL=http://influxdb:8086
+      - INFLUX_TOKEN=admin_token
+      - INFLUX_ORG=tfg
+      - INFLUX_BUCKET=pipeline
     ports:
       - "8082:8082"
     depends_on:
       - kafka
+      - influxdb
     networks:
       - tfg_net
     volumes:
