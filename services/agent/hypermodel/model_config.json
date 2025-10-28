@@ -1,0 +1,7 @@
+{
+  "models": [
+    { "type": "linear",    "name": "linear_8",   "params": { "window": 8 },   "init_weight": 1.0 },
+    { "type": "poly",      "name": "poly2_12",   "params": { "degree": 2, "window": 12 }, "init_weight": 1.0 },
+    { "type": "alphabeta", "name": "ab_fast",    "params": { "alpha": 0.9, "beta": 0.01, "dt": 1.0 }, "init_weight": 1.0 }
+  ]
+}
