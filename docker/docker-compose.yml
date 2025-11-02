@@ -94,6 +94,8 @@ services:
       - LEARN_PERIOD_SEC=86400
       - HYPERMODEL_CONFIG=/app/hypermodel/model_config.json
       - HYPERMODEL_DECAY=0.95
+      - PYTHONPATH=/app
+      - HYPERMODEL_CONFIG=/app/hypermodel/model_config.json
       - HYPERMODEL_W_CAP=10.0
       - BUFFER_LEN=32
     depends_on:
@@ -104,9 +106,8 @@ services:
     networks: [ tfg_net ]
     volumes:
       - ../data:/app/data
-      - ../hypermodel:/app/hypermodel
     ports:
-      - "8090:8090"   # opcional (debug)
+      - "8090:8090"   
     restart: always
 
   window_collector:

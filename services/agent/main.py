@@ -7,6 +7,8 @@ from influxdb_client.client.write_api import SYNCHRONOUS
 from influxdb_client.client.delete_api import DeleteApi
 from fastapi import FastAPI
 import uvicorn
+from hypermodel.hyper_model import HyperModel
+
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("agent")

@@ -1,25 +1,21 @@
 import json, math
 from typing import Sequence, Dict, Any, Tuple
 
-from pydantic import BaseModel
-from .linear import LinearModel
-from .poly import PolyModel
+from .linear_model import LinearModel
+from .poly_model import PolyModel
 from .alphabeta import AlphaBetaModel
-from services.agent.hypermodel.kalman_model import KalmanModel
+from .kalman_model import KalmanModel
+
 
 MODEL_REGISTRY = {
     "linear": LinearModel,
     "poly": PolyModel,
     "alphabeta": AlphaBetaModel,
     "kalman": KalmanModel,
-    "base": BaseModel,
 }
 
 class HyperModel:
     def __init__(self, cfg_path: str, decay: float = 0.9, eps: float = 1e-6, w_cap: float = 10.0):
-        """
-        decay: factor de olvido exponencial (0<decay<1); cuanto más cercano a 1, más memoria.
-        """
         self.decay = decay
         self.eps = eps
         self.w_cap = w_cap
@@ -30,7 +26,7 @@ class HyperModel:
         for m in cfg.get("models", []):
             mtype = m["type"]
             name  = m["name"]
-            cls = MODEL_REGISTRY[mtype]
+            cls = MODEL_REGISTRY[mtype]  # lanzará KeyError si hay un type no soportado
             inst = cls(name=name, **(m.get("params", {})))
             self.models.append(inst)
             self.w[name] = float(m.get("init_weight", 1.0))
@@ -39,20 +35,14 @@ class HyperModel:
     def predict(self, series: Sequence[float]) -> Tuple[float, Dict[str, float]]:
         preds = {m.name: float(m.predict(series)) for m in self.models}
         self._last_preds = preds
-        # Media ponderada (normalizar pesos > 0)
         total_w = sum(max(self.w[n], 0.0) for n in preds)
         if total_w <= self.eps:
-            # fallback: promedio simple
             y_hat = sum(preds.values()) / max(len(preds), 1)
         else:
             y_hat = sum(preds[n] * max(self.w[n], 0.0) for n in preds) / total_w
         return float(y_hat), preds
 
     def update_weights(self, y_true: float):
-        """ Actualiza pesos en función del error último (inversamente proporcional).
-            w_i <- decay*w_i + (1-decay) * score_i,  score_i = 1 / (eps + |e_i|)
-            y_true es la observación real que acaba de llegar.
-        """
         if not self._last_preds:
             return
         scores = {}
@@ -60,7 +50,6 @@ class HyperModel:
             e = abs(y_true - y_pred)
             scores[name] = 1.0 / (self.eps + e)
 
-        # Normalizado opcional de scores
         s_sum = sum(scores.values())
         if s_sum > self.eps:
             for k in scores:
