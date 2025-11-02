@@ -1,4 +1,3 @@
-# services/window_collector/main.py
 import os, json, threading, socket, time
 import pandas as pd
 from kafka import KafkaConsumer, KafkaProducer
@@ -19,7 +18,8 @@ INFLUX_ORG = os.getenv("INFLUX_ORG", "tfg")
 INFLUX_BUCKET = os.getenv("INFLUX_BUCKET", "pipeline")
 # Deduplicación configurable (en compose tienes DEDUP_KEY=timestamp,id)
 DEDUP_KEY = os.getenv("DEDUP_KEY", "timestamp,id")
-_key_fields = tuple(k.strip() for k in DEDUP_KEY.split(",") if k.strip())
+_key_fields = [s.strip() for s in DEDUP_KEY.split(",") if s.strip()]
+
 
 os.makedirs(os.path.dirname(OUTPATH), exist_ok=True)
 
@@ -75,60 +75,52 @@ def _key_tuple(rec: dict):
     return tuple(rec.get(f) for f in _key_fields) if _key_fields else (rec.get("timestamp"), rec.get("id"))
 
 def write_to_influx(rec):
-    """
-    Guarda:
-      - telemetry.var       @ timestamp (observado)
-      - telemetry.prediction@ ts_pred (predicción a horizonte)
-      - weights.w (por modelo) @ ts_pred (estado del hypermodel en ese tick)
-    """
-    try:
-        unit = rec.get("id") or rec.get("unit_id") or "unknown"
+    unit = rec.get("id") or rec.get("unit_id") or "unknown"
 
-        # 1) Dato observado (var) con timestamp del CSV movido a HOY
-        if "var" in rec and rec["var"] is not None:
-            p = (
-                Point("telemetry")
-                .tag("id", unit)
-                .field("var", float(rec["var"]))
-                .time(_shift_ts_to_today(rec.get("timestamp")), WritePrecision.S)
-            )
+    # Observado
+    if "var" in rec:
+        try:
+            p = (Point("telemetry").tag("id", unit)
+                 .field("var", float(rec["var"]))
+                 .time(_shift_ts_to_today(rec.get("timestamp")), WritePrecision.S))
             _write_api.write(bucket=INFLUX_BUCKET, record=p)
+        except Exception as e:
+            print(f"[collector] ❌ Error guardando observed: {e}")
 
-        # 2) Predicción global del HyperModel (campo yhat), time = ts_pred si viene, si no timestamp
-        if "yhat" in rec and rec["yhat"] is not None:
-            t_pred = _shift_ts_to_today(rec.get("ts_pred") or rec.get("timestamp"))
-            p = (
-                Point("telemetry")
-                .tag("id", unit)
-                .field("prediction", float(rec["yhat"]))
-                .time(t_pred, WritePrecision.S)
-            )
+    # Predicción
+    if "yhat" in rec:
+        try:
+            p = (Point("telemetry").tag("id", unit)
+                 .field("prediction", float(rec["yhat"]))
+                 .time(_shift_ts_to_today(rec.get("ts_pred") or rec.get("timestamp")), WritePrecision.S))
             _write_api.write(bucket=INFLUX_BUCKET, record=p)
+        except Exception as e:
+            print(f"[collector] ❌ Error guardando prediction: {e}")
 
-        # 3) Pesos del HyperModel (si el agent los envía)
-        # Esperamos: rec["hyper_weights"] = {"linear_8": 0.42, "poly2_12": 0.31, "ab_fast": 0.27, ...}
-        if isinstance(rec.get("hyper_weights"), dict):
-            t_pred = _shift_ts_to_today(rec.get("ts_pred") or rec.get("timestamp"))
-            for model_name, w in rec["hyper_weights"].items():
-                if w is None:
-                    continue
-                pw = (
-                    Point("weights")
-                    .tag("id", unit)
-                    .tag("model", str(model_name))
-                    .field("w", float(w))
-                    .time(t_pred, WritePrecision.S)
+    # Pesos del HyperModel → measurement 'weights'
+    weights = rec.get("hyper_weights")
+    if isinstance(weights, dict):
+        try:
+            tsw = _shift_ts_to_today(rec.get("ts_pred") or rec.get("timestamp"))
+            for model_name, w in weights.items():
+                _write_api.write(
+                    bucket=INFLUX_BUCKET,
+                    record=(
+                        Point("weights")
+                        .tag("id", unit)
+                        .tag("model", str(model_name))
+                        .field("w", float(w))
+                        .time(tsw, WritePrecision.S)
+                    ),
                 )
-                _write_api.write(bucket=INFLUX_BUCKET, record=pw)
+        except Exception as e:
+            print(f"[collector] ❌ Error guardando weights: {e}")
 
-    except Exception as e:
-        print(f"[collector] ❌ Error escribiendo en Influx: {e}")
 
 def run_consumer():
-    wait_for_kafka(BROKER)
-
     while True:
         try:
+            wait_for_kafka(BROKER, timeout=300)
             consumer = KafkaConsumer(
                 TOUT,
                 bootstrap_servers=BROKER,
@@ -154,11 +146,12 @@ def run_consumer():
                 # Publicar copia procesada
                 try:
                     producer.send(TPROC, rec)
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[collector] ⚠️ Error en consumer loop: {e}")
+                    time.sleep(5)
 
                 # Deduplicación (opcional)
-                k = _key_tuple(rec)
+                k = tuple(rec.get(f) for f in _key_fields)
                 with _lock:
                     _last_by_key[k] = rec
 
