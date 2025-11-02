@@ -7,7 +7,6 @@ from influxdb_client import InfluxDBClient, Point, WritePrecision
 from influxdb_client.client.write_api import SYNCHRONOUS
 from datetime import datetime, timezone
 
-
 # === ENV VARS ===
 BROKER = os.getenv("KAFKA_BROKER", "kafka:9092")
 TOUT = os.getenv("TOPIC_AGENT_OUT", "telemetry.agent.out")
@@ -17,6 +16,10 @@ INFLUX_URL = os.getenv("INFLUX_URL", "http://influxdb:8086")
 INFLUX_TOKEN = os.getenv("INFLUX_TOKEN", "admin_token")
 INFLUX_ORG = os.getenv("INFLUX_ORG", "tfg")
 INFLUX_BUCKET = os.getenv("INFLUX_BUCKET", "pipeline")
+# Deduplicación configurable (en compose tienes DEDUP_KEY=timestamp,id)
+DEDUP_KEY = os.getenv("DEDUP_KEY", "timestamp,id")
+_key_fields = [s.strip() for s in DEDUP_KEY.split(",") if s.strip()]
+
 
 os.makedirs(os.path.dirname(OUTPATH), exist_ok=True)
 
@@ -56,6 +59,7 @@ def _parse_ts(ts_any):
         return None
 
 def _shift_ts_to_today(ts_str):
+    """Mantiene H/M/S del mensaje y mueve la FECHA a hoy (UTC)."""
     if not ts_str:
         return datetime.utcnow().replace(tzinfo=timezone.utc)
     s = str(ts_str).replace("T", " ").replace("Z", "")
@@ -66,45 +70,63 @@ def _shift_ts_to_today(ts_str):
     today = datetime.utcnow().date()
     return datetime.combine(today, t).replace(tzinfo=timezone.utc)
 
+def _key_tuple(rec: dict):
+    # Construye la clave de dedupe con los campos configurados; si faltan, usa None
+    return tuple(rec.get(f) for f in _key_fields) if _key_fields else (rec.get("timestamp"), rec.get("id"))
+
 def write_to_influx(rec):
-    """Guarda un registro individual en InfluxDB (var y predicción si existen)."""
-    try:
-        unit = rec.get("id") or rec.get("unit_id") or "unknown"
+    unit = rec.get("id") or rec.get("unit_id") or "unknown"
 
-        # Dato observado
-        if "var" in rec:
-            p = (
-                Point("telemetry")
-                .tag("id", unit)
-                .field("var", float(rec["var"]))
-                .time(_shift_ts_to_today(rec.get("timestamp")), WritePrecision.S)
-            )
+    # Observado
+    if "var" in rec:
+        try:
+            p = (Point("telemetry").tag("id", unit)
+                 .field("var", float(rec["var"]))
+                 .time(_shift_ts_to_today(rec.get("timestamp")), WritePrecision.S))
             _write_api.write(bucket=INFLUX_BUCKET, record=p)
+        except Exception as e:
+            print(f"[collector] ❌ Error guardando observed: {e}")
 
-        if "yhat" in rec:
-            p = (
-                Point("telemetry")
-                .tag("id", unit)
-                .field("prediction", float(rec["yhat"]))
-                .time(_shift_ts_to_today(rec.get("ts_pred") or rec.get("timestamp")), WritePrecision.S)
-            )
+    # Predicción
+    if "yhat" in rec:
+        try:
+            p = (Point("telemetry").tag("id", unit)
+                 .field("prediction", float(rec["yhat"]))
+                 .time(_shift_ts_to_today(rec.get("ts_pred") or rec.get("timestamp")), WritePrecision.S))
             _write_api.write(bucket=INFLUX_BUCKET, record=p)
+        except Exception as e:
+            print(f"[collector] ❌ Error guardando prediction: {e}")
 
+    # Pesos del HyperModel → measurement 'weights'
+    weights = rec.get("hyper_weights")
+    if isinstance(weights, dict):
+        try:
+            tsw = _shift_ts_to_today(rec.get("ts_pred") or rec.get("timestamp"))
+            for model_name, w in weights.items():
+                _write_api.write(
+                    bucket=INFLUX_BUCKET,
+                    record=(
+                        Point("weights")
+                        .tag("id", unit)
+                        .tag("model", str(model_name))
+                        .field("w", float(w))
+                        .time(tsw, WritePrecision.S)
+                    ),
+                )
+        except Exception as e:
+            print(f"[collector] ❌ Error guardando weights: {e}")
 
-    except Exception as e:
-        print(f"[collector] ❌ Error escribiendo en Influx: {e}")
 
 def run_consumer():
-    wait_for_kafka(BROKER)
-
     while True:
         try:
+            wait_for_kafka(BROKER, timeout=300)
             consumer = KafkaConsumer(
                 TOUT,
                 bootstrap_servers=BROKER,
                 auto_offset_reset="earliest",
                 enable_auto_commit=False,
-                group_id="collector-v4"
+                group_id="collector-v5"
             )
             print(f"[collector] ✅ Suscrito a {TOUT}, esperando mensajes...")
 
@@ -115,23 +137,28 @@ def run_consumer():
 
             for msg in consumer:
                 try:
-                    rec = json.loads(msg.value.decode("utf-8"))
+                    # En tu agent ya usas value_serializer json; aquí por robustez re-decodiﬁcamos
+                    rec = json.loads(msg.value.decode("utf-8")) if isinstance(msg.value, (bytes, bytearray)) else msg.value
                 except Exception as e:
                     print("[collector] ❌ Error decoding message:", e)
                     continue
 
                 # Publicar copia procesada
-                producer.send(TPROC, rec)
+                try:
+                    producer.send(TPROC, rec)
+                except Exception as e:
+                    print(f"[collector] ⚠️ Error en consumer loop: {e}")
+                    time.sleep(5)
 
-                # Deduplicación
-                k = tuple(rec.get(f) for f in key_fields)
+                # Deduplicación (opcional)
+                k = tuple(rec.get(f) for f in _key_fields)
                 with _lock:
                     _last_by_key[k] = rec
 
                 # Escribir en Influx
                 write_to_influx(rec)
 
-                print(f"[collector] ⚙️ recibido: {k}")
+                print(f"[collector] ⚙️ recibido key={k}")
 
         except Exception as e:
             print(f"[collector] ⚠️ Error en consumer loop: {e}")
