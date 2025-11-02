@@ -1,12 +1,10 @@
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 import httpx, requests, time, os, aiofiles, json
 from dotenv import load_dotenv
 from influxdb_client import InfluxDBClient
 from datetime import datetime, timedelta
-from fastapi import Query
-
 
 # === METRICS STATE ===
 start_time = time.time()
@@ -30,15 +28,21 @@ COLLECTOR_FLUSH = os.getenv("COLLECTOR_FLUSH", "http://window_collector:8082/flu
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:5174"], 
+    allow_origins=["http://localhost:5173", "http://localhost:5174"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
 DATA_DIR = "/app/data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
+# ---------- helpers ----------
+def _influx_query():
+    return InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG).query_api()
+
+def _ts_ms(dt) -> int:
+    # Influx client ya devuelve timezone-aware → pasamos a epoch ms
+    return int(dt.timestamp() * 1000)
 
 # ============================================================
 #  POST /api/upload_csv — guarda CSV subido
@@ -53,9 +57,9 @@ async def upload_csv(file: UploadFile = File(...)):
     print(f"[orchestrator] CSV recibido y guardado en {path}")
     return {"saved": True, "path": path}
 
+# ---------- debug placeholders (opcionales) ----------
 @app.get("/kafka/in")
 def kafka_in():
-    # Si quieres, podrías leer últimos N mensajes de un topic con kafka-python.
     return {"messages": []}
 
 @app.get("/kafka/out")
@@ -77,52 +81,102 @@ def debug_ls():
         except Exception as e:
             files.append({"name": name, "error": str(e)})
     return {"dir": "/app/data", "files": files}
+
+# ============================================================
+#  GET /api/series — observado + predicho normalizados
+# ============================================================
 @app.get("/api/series")
 def get_series(
     id: str | None = Query(default=None),
     hours: int = Query(default=48, ge=1, le=24*30)
 ):
-    def _run_query(tag_filter: str):
-        flux = f'''
-        from(bucket:"{INFLUX_BUCKET}")
-          |> range(start: -{hours}h)
-          |> filter(fn: (r) => r._measurement == "telemetry" and (r._field == "var" or r._field == "prediction"))
-          {tag_filter}
-          |> keep(columns: ["_time","_field","_value"])
-          |> sort(columns: ["_time"])
-        '''
-        tables = q.query(flux)
-        out = {"var": [], "prediction": []}
-        for t in tables:
-            for r in t.records:
-                out[r.get_field()].append({"ts": r.get_time().isoformat(), "value": float(r.get_value())})
-        return out
+    """
+    Devuelve:
+    {
+      "observed":  [{ "t": <epoch_ms>, "y": <float> }, ...],
+      "predicted": [{ "t": <epoch_ms>, "y_hat": <float> }, ...]
+    }
+    Lee measurement=telemetry con fields 'var' (observado) y 'prediction' (y_hat).
+    """
+    q = _influx_query()
 
-    client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
-    q = client.query_api()
-
-    data = {}
+    tag_filter = ''
     if id:
-        # intenta por 'id' y, por compat, por 'unit'
-        data = _run_query(f'|> filter(fn: (r) => r.id == "{id}" or r.unit == "{id}")')
+        # intentamos por 'id' y, por compatibilidad antigua, por 'unit'
+        tag_filter = f'|> filter(fn: (r) => r.id == "{id}" or r.unit == "{id}")'
 
-    # fallback: si está vacío, trae sin filtro
-    if not data or (not data["var"] and not data["prediction"]):
-        data = _run_query("")  # sin filtro
+    flux_obs = f'''
+from(bucket:"{INFLUX_BUCKET}")
+  |> range(start: -{hours}h)
+  |> filter(fn:(r)=> r._measurement == "telemetry" and r._field == "var")
+  {tag_filter}
+  |> keep(columns: ["_time","_value"])
+  |> sort(columns: ["_time"])
+'''
+    flux_pred = f'''
+from(bucket:"{INFLUX_BUCKET}")
+  |> range(start: -{hours}h)
+  |> filter(fn:(r)=> r._measurement == "telemetry" and r._field == "prediction")
+  {tag_filter}
+  |> keep(columns: ["_time","_value"])
+  |> sort(columns: ["_time"])
+'''
 
-    return data
+    observed = [{"t": _ts_ms(r.get_time()), "y": float(r.get_value())}
+                for t in q.query(flux_obs) for r in t.records]
+    predicted = [{"t": _ts_ms(r.get_time()), "y_hat": float(r.get_value())}
+                 for t in q.query(flux_pred) for r in t.records]
 
+    # Aseguramos orden
+    observed.sort(key=lambda x: x["t"])
+    predicted.sort(key=lambda x: x["t"])
+
+    # Fallback: si no hay nada y no se pasó id, devolvemos vacío (UI debe manejarlo)
+    return {"observed": observed, "predicted": predicted}
+
+# ============================================================
+#  GET /api/weights — pesos del HyperModel en el tiempo
+# ============================================================
+@app.get("/api/weights")
+def get_weights(
+    id: str = Query(..., description="flow id (tag 'id' en Influx)"),
+    hours: int = Query(default=48, ge=1, le=24*30)
+):
+    """
+    Devuelve lista plana con los pesos por modelo:
+    [ { "t": <epoch_ms>, "model": "<name>", "w": <float> }, ... ]
+    Requiere que el collector escriba measurement='weights' (tag id, tag model, field w).
+    Si aún no se persisten pesos, devolverá [].
+    """
+    q = _influx_query()
+    flux = f'''
+from(bucket:"{INFLUX_BUCKET}")
+  |> range(start: -{hours}h)
+  |> filter(fn:(r)=> r._measurement == "weights" and r.id == "{id}" and r._field == "w")
+  |> keep(columns: ["_time","model","_value"])
+  |> sort(columns: ["_time"])
+'''
+    rows = [{"t": _ts_ms(r.get_time()), "model": r.values.get("model"), "w": float(r.get_value())}
+            for t in q.query(flux) for r in t.records]
+    rows.sort(key=lambda x: x["t"])
+    return rows
+
+# ============================================================
+#  GET /api/ids — lista de series disponibles (tag id)
+# ============================================================
 @app.get("/api/ids")
 def list_ids():
     flux = f'''
-    import "influxdata/influxdb/schema"
-    schema.tagValues(bucket: "{INFLUX_BUCKET}", tag: "id")
-    '''
-    client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
-    tabs = client.query_api().query(flux)
+import "influxdata/influxdb/schema"
+schema.tagValues(bucket: "{INFLUX_BUCKET}", tag: "id")
+'''
+    tabs = _influx_query().query(flux)
     ids = sorted({ r.get_value() for t in tabs for r in t.records if r.get_value() })
     return {"ids": ids}
 
+# ============================================================
+#  POST /api/run_window — limpia bucket, lanza loader y hace flush
+# ============================================================
 @app.post("/api/run_window")
 def run_window():
     global last_flush_rows
@@ -142,7 +196,7 @@ def run_window():
         r.raise_for_status()
         loader_response = r.json()
 
-        # da un margen breve a agent->collector->influx (mejor que 5 fijo)
+        # margen breve agent->collector->influx
         for _ in range(6):
             time.sleep(1)
             try:
@@ -150,7 +204,6 @@ def run_window():
                 if r2.ok:
                     data = r2.json()
                     last_flush_rows = data.get("rows", 0)
-                # si ya hay algo, salimos antes
                 if last_flush_rows:
                     break
             except Exception:
@@ -167,7 +220,6 @@ def run_window():
     except Exception as e:
         print(f"[orchestrator] error en run_window: {e}")
         return {"triggered": False, "status_code": 500, "error": str(e)}
-
 
 # ============================================================
 #  Otros endpoints auxiliares

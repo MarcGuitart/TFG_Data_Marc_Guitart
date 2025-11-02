@@ -1,8 +1,14 @@
+# docker/Dockerfile.agent
 FROM python:3.11
 ENV PYTHONUNBUFFERED=1
 WORKDIR /app
+
+# Código del agent
 COPY services/agent/ /app/
+
 RUN pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir influxdb-client
-RUN apt-get update && apt-get install -y netcat-openbsd net-tools iputils-ping
+    && pip install --no-cache-dir influxdb-client \
+    && apt-get update && apt-get install -y netcat-openbsd net-tools iputils-ping
+
+ENV PYTHONPATH=/app
 CMD ["python","-u","main.py"]
