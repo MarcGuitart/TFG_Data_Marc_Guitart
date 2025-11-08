@@ -89,8 +89,8 @@ services:
       - SLOT_MINUTES=30
       - MODEL_CLASS=agent.model:NaiveDailyProfileModel
       - MODEL_PATH=/app/data/model_daily.json
-      - PRED_HORIZON_MIN=30
-      - LEARN_LOOKBACK_DAYS=30
+      - PRED_HORIZON_MIN=240
+      - LEARN_LOOKBACK_DAYS=7
       - LEARN_PERIOD_SEC=86400
       - HYPERMODEL_CONFIG=/app/hypermodel/model_config.json
       - HYPERMODEL_DECAY=0.95
