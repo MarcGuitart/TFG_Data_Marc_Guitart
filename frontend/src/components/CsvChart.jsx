@@ -14,11 +14,11 @@ export default function CsvChart({ data = [] }) {
     return (Array.isArray(data) ? data : [])
       .map(d => ({
         x: toIso(d),
-        var: typeof d?.var === "number" ? d.var : undefined,
-        prediction: typeof d?.prediction === "number" ? d.prediction : undefined,
-        pred_conf: typeof d?.pred_conf === "number" ? d.pred_conf : undefined,
+        var: Number.isFinite(d?.var) ? d.var : undefined,
+        prediction: Number.isFinite(d?.prediction) ? d.prediction : undefined,
+        pred_conf: Number.isFinite(d?.pred_conf) ? d.pred_conf : undefined,
       }))
-      .filter(d => d.x && (typeof d.var === "number" || typeof d.prediction === "number"));
+      .filter(d => d.x && (Number.isFinite(d.var) || Number.isFinite(d.prediction)));
   }, [data]);
 
   const fmt = (s) => { try { return new Date(s).toLocaleString(); } catch { return String(s); } };
@@ -34,18 +34,53 @@ export default function CsvChart({ data = [] }) {
       <ResponsiveContainer>
         <ComposedChart data={norm} margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
           <CartesianGrid strokeDasharray="3 3" opacity={0.25} />
-          <XAxis dataKey="x" tickFormatter={(v) => (v ? new Date(v).toLocaleTimeString() : "")}
-                 minTickGap={40} interval="preserveStartEnd" />
+          <XAxis
+            dataKey="x"
+            tickFormatter={(v) => (v ? new Date(v).toLocaleTimeString() : "")}
+            minTickGap={40}
+            interval="preserveStartEnd"
+          />
           <YAxis allowDataOverflow width={50} />
-          <Tooltip labelFormatter={(v) => fmt(v)}
-                   formatter={(value, name) => [value, name === "var" ? "Real" : name === "prediction" ? "Pred" : name]} />
+          <Tooltip
+            labelFormatter={(v) => fmt(v)}
+            formatter={(value, name) => [
+              typeof value === "number" ? value : undefined,
+              name === "var" ? "Real" : name === "prediction" ? "Pred" : name
+            ]}
+          />
           <Legend />
-          <Line type="monotone" dataKey="var" name="Real" stroke="#00A3FF" strokeWidth={2} dot={false} connectNulls />
-          <Line type="monotone" dataKey="prediction" name="Pred" stroke="#FF7A00" strokeWidth={2} dot={false} connectNulls />
+          {/* Observados (azul) 0..t */}
           <Line
-            dataKey="prediction" name="Pred (pts)" stroke="none"
-            dot={{ r: 3, fill: "#FF7A00", fillOpacity: (e) => (typeof e?.pred_conf === "number" ? Math.max(0.15, e.pred_conf) : 0.6) }}
+            type="monotone"
+            dataKey="var"
+            name="Real"
+            stroke="#00A3FF"
+            strokeWidth={2}
+            dot={false}
+            connectNulls
+          />
+          {/* Predicciones (naranja, discontinua) 0+1..t+1 */}
+          <Line
+            type="monotone"
+            dataKey="prediction"
+            name="Pred"
+            stroke="#FF7A00"
+            strokeWidth={2}
+            dot={false}
+            connectNulls
+            strokeDasharray="5 5"
+          />
+          {/* Puntos de predicción con opacidad por pred_conf */}
+          <Line
+            dataKey="prediction"
+            name="Pred (pts)"
+            stroke="none"
             isAnimationActive={false}
+            dot={(props) => {
+              const { cx, cy, payload } = props;
+              const alpha = Math.max(0.15, Math.min(1, Number(payload?.pred_conf ?? 0.6)));
+              return <circle cx={cx} cy={cy} r={3} fill="#FF7A00" fillOpacity={alpha} />;
+            }}
           />
         </ComposedChart>
       </ResponsiveContainer>

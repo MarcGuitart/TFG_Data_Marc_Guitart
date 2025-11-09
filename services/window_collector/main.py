@@ -77,31 +77,41 @@ def _key_tuple(rec: dict):
 def write_to_influx(rec):
     unit = rec.get("id") or rec.get("unit_id") or "unknown"
 
-    # Observado
+    # Observado (mantienes el mapeo a HOY para demo)
     if "var" in rec:
         try:
-            p = (Point("telemetry").tag("id", unit)
-                 .field("var", float(rec["var"]))
-                 .time(_shift_ts_to_today(rec.get("timestamp")), WritePrecision.S))
+            p = (
+                Point("telemetry")
+                .tag("id", unit)
+                .field("var", float(rec["var"]))
+                .time(_shift_ts_to_today(rec.get("timestamp")), WritePrecision.S)
+            )
             _write_api.write(bucket=INFLUX_BUCKET, record=p)
         except Exception as e:
             print(f"[collector] ❌ Error guardando observed: {e}")
 
-    # Predicción
+    # ✅ Predicción en ts_pred (sin inventarnos funciones)
     if "yhat" in rec:
-        try:
-            p = (Point("telemetry").tag("id", unit)
-                 .field("prediction", float(rec["yhat"]))
-                 .time(_shift_ts_to_today(rec.get("ts_pred") or rec.get("timestamp")), WritePrecision.S))
-            _write_api.write(bucket=INFLUX_BUCKET, record=p)
-        except Exception as e:
-            print(f"[collector] ❌ Error guardando prediction: {e}")
+        ts_pred_str = rec.get("ts_pred")  # "YYYY-mm-dd HH:MM:SS"
+        if ts_pred_str:
+            when = _parse_ts(ts_pred_str)  # NO uses timestamp aquí
+            try:
+                p = (
+                    Point("telemetry")
+                    .tag("id", unit)
+                    .field("prediction", float(rec["yhat"]))
+                    .time(when, WritePrecision.S)
+                )
+                _write_api.write(bucket=INFLUX_BUCKET, record=p)
+            except Exception as e:
+                print(f"[collector] ❌ Error guardando prediction: {e}")
+        # si no hay ts_pred, no escribas prediction desde el collector
 
-    # Pesos del HyperModel → measurement 'weights'
+    # Pesos (opcional)
     weights = rec.get("hyper_weights")
     if isinstance(weights, dict):
         try:
-            tsw = _shift_ts_to_today(rec.get("ts_pred") or rec.get("timestamp"))
+            tsw = _parse_ts(rec.get("ts_pred")) or _shift_ts_to_today(rec.get("timestamp"))
             for model_name, w in weights.items():
                 _write_api.write(
                     bucket=INFLUX_BUCKET,
@@ -115,6 +125,7 @@ def write_to_influx(rec):
                 )
         except Exception as e:
             print(f"[collector] ❌ Error guardando weights: {e}")
+
 
 
 def run_consumer():

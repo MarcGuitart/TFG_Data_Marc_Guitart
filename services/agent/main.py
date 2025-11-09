@@ -8,61 +8,8 @@ from influxdb_client.client.delete_api import DeleteApi
 from fastapi import FastAPI
 import uvicorn
 from hypermodel.hyper_model import HyperModel
+from datetime import datetime, timedelta, timezone
 
-
-logging.basicConfig(level=logging.INFO)
-log = logging.getLogger("agent")
-
-# === MODELOS ===
-try:
-    # Modelo previo (lo conservamos para compatibilidad con learner/estado)
-    from agent.model import NaiveDailyProfileModel
-except ModuleNotFoundError:
-    from model import NaiveDailyProfileModel
-
-# --- HyperModel (nuevo) ---
-# Permitimos dos rutas de import para no depender del layout exacto del paquete
-try:
-    from agent.hypermodel.hyper_model import HyperModel
-except ModuleNotFoundError:
-    try:
-        from hypermodel.hyper_model import HyperModel
-    except ModuleNotFoundError:
-        # fallback muy directo si lo tienes plano
-        from hyper_model import HyperModel
-
-# === CONFIG ===
-FLAVOR = os.getenv("FLAVOR", "inference")
-BROKER = os.getenv("KAFKA_BROKER", "kafka:9092")
-TIN = os.getenv("TOPIC_AGENT_IN", "telemetry.agent.in")
-TOUT = os.getenv("TOPIC_AGENT_OUT", "telemetry.agent.out")
-
-INFLUX_URL = os.getenv("INFLUX_URL", "http://influxdb:8086")
-INFLUX_TOKEN = os.getenv("INFLUX_TOKEN", "admin_token")
-INFLUX_ORG = os.getenv("INFLUX_ORG", "tfg")
-INFLUX_BUCKET = os.getenv("INFLUX_BUCKET", "pipeline")
-MAX_ROWS_PER_UNIT = int(os.getenv("MAX_ROWS_PER_UNIT", "1000"))
-
-LEARN_LOOKBACK_DAYS = int(os.getenv("LEARN_LOOKBACK_DAYS", "30"))
-LEARN_PERIOD_SEC    = int(os.getenv("LEARN_PERIOD_SEC", "86400"))
-
-# --- HyperModel config ---
-HYPER_CFG_PATH = os.getenv("HYPERMODEL_CONFIG", "/app/hypermodel/model_config.json")
-HYPER_DECAY    = float(os.getenv("HYPERMODEL_DECAY", "0.95"))
-HYPER_W_CAP    = float(os.getenv("HYPERMODEL_W_CAP", "10.0"))
-BUFFER_LEN     = int(os.getenv("BUFFER_LEN", "32"))  # tamaño ventana por id
-
-# === HTTP app (health) ===
-app = FastAPI()
-@app.get("/health")
-def health(): return {"status": "ok"}
-
-# === CLIENTES Influx ===
-client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
-delete_api: DeleteApi = client.delete_api()
-write_api = client.write_api(write_options=SYNCHRONOUS)
-
-# === UTILIDADES TIEMPO ===
 def now_utc():
     return datetime.utcnow().replace(tzinfo=timezone.utc)
 
@@ -91,6 +38,68 @@ def parse_ts_keep_date(ts_str):
     except Exception:
         dt = datetime.utcnow()
     return dt.replace(tzinfo=timezone.utc)
+
+
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("agent")
+
+# === MODELOS ===
+try:
+    # Modelo previo (lo conservamos para compatibilidad con learner/estado)
+    from agent.model import NaiveDailyProfileModel
+except ModuleNotFoundError:
+    from model import NaiveDailyProfileModel
+
+# --- HyperModel (nuevo) ---
+# Permitimos dos rutas de import para no depender del layout exacto del paquete
+try:
+    from agent.hypermodel.hyper_model import HyperModel
+except ModuleNotFoundError:
+    try:
+        from hypermodel.hyper_model import HyperModel
+    except ModuleNotFoundError:
+        # fallback muy directo si lo tienes plano
+        from hyper_model import HyperModel
+
+# === CONFIG ===
+FLAVOR = os.getenv("FLAVOR", "inference")
+BROKER = os.getenv("KAFKA_BROKER", "kafka:9092")
+TIN = os.getenv("TOPIC_AGENT_IN", "telemetry.agent.in")
+TOUT = os.getenv("TOPIC_AGENT_OUT", "telemetry.agent.out")
+# arriba, junto a otras ENV
+PRESERVE_DATES = os.getenv("PRESERVE_DATES", "false").lower() == "true"
+
+
+INFLUX_URL = os.getenv("INFLUX_URL", "http://influxdb:8086")
+INFLUX_TOKEN = os.getenv("INFLUX_TOKEN", "admin_token")
+INFLUX_ORG = os.getenv("INFLUX_ORG", "tfg")
+INFLUX_BUCKET = os.getenv("INFLUX_BUCKET", "pipeline")
+MAX_ROWS_PER_UNIT = int(os.getenv("MAX_ROWS_PER_UNIT", "1000"))
+
+LEARN_LOOKBACK_DAYS = int(os.getenv("LEARN_LOOKBACK_DAYS", "30"))
+LEARN_PERIOD_SEC    = int(os.getenv("LEARN_PERIOD_SEC", "86400"))
+
+# --- HyperModel config ---
+HYPER_CFG_PATH = os.getenv("HYPERMODEL_CONFIG", "/app/hypermodel/model_config.json")
+HYPER_DECAY    = float(os.getenv("HYPERMODEL_DECAY", "0.95"))
+HYPER_W_CAP    = float(os.getenv("HYPERMODEL_W_CAP", "10.0"))
+BUFFER_LEN     = int(os.getenv("BUFFER_LEN", "32"))  # tamaño ventana por id
+
+# === HTTP app (health) ===
+app = FastAPI()
+@app.get("/health")
+def health(): return {"status": "ok"}
+
+# === CLIENTES Influx ===
+client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
+delete_api: DeleteApi = client.delete_api()
+write_api = client.write_api(write_options=SYNCHRONOUS)
+
+# === UTILIDADES TIEMPO ===
+
+def select_ts(ts_str):
+    return parse_ts_keep_date(ts_str) if PRESERVE_DATES else shift_ts_to_today(ts_str)
+
 
 # === ESPERA KAFKA ===
 def wait_for_kafka(broker: str, timeout=300):
@@ -155,16 +164,19 @@ def write_timeseries(rec):
     unit = rec.get("unit_id") or rec.get("id") or "unknown"
     p = Point("telemetry").tag("id", unit)
     fields_added = False
-    for f in ["v1", "v2", "v3", "v4", "v5", "var"]:
+    # Aceptamos alias comunes y v1..v5
+    value_fields = ["var", "value", "traffic", "count", "y", "v1", "v2", "v3", "v4", "v5"]
+    for f in value_fields:
         if f in rec and rec[f] is not None:
             try:
                 p = p.field(f, float(rec[f]))
                 fields_added = True
             except Exception as e:
                 log.warning("field cast error: %s rec=%s", e, rec)
+            break
     if not fields_added:
         p = p.field("dummy", 1.0)
-    ts = shift_ts_to_today(rec.get("timestamp"))
+    ts = select_ts(rec.get("timestamp"))
     p = p.time(ts, WritePrecision.S)
     if "var" in rec and rec["var"] is not None:
         try:
@@ -270,7 +282,9 @@ def main():
         try:
             unit = rec.get("unit_id") or rec.get("id") or "unknown"
             y_real = rec.get("var")
-            base_ts = shift_ts_to_today(rec.get("timestamp"))
+            base_ts = select_ts(rec.get("timestamp"))
+            ts_pred = base_ts + timedelta(minutes=PRED_HORIZON_MIN)
+
 
             # --- actualizar pesos con la VERDAD del tick anterior (si existía pred previa)
             if unit in last_pred_by_id and y_real is not None:
@@ -293,6 +307,9 @@ def main():
             weights = hm.export_state()
             last_pred_by_id[unit] = y_hat
 
+            log.info("[pred-ts] base=%s ts_pred=%s delta_min=%.1f",
+                base_ts.isoformat(), ts_pred.isoformat(),
+                (ts_pred - base_ts).total_seconds()/60.0)
             # 3) Compatibilidad: conservamos tu horizonte y escritura de 'prediction'
             ts_pred = base_ts + timedelta(minutes=PRED_HORIZON_MIN)
             write_prediction(unit, ts_pred, y_hat)
