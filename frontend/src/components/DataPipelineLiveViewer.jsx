@@ -3,11 +3,7 @@ import "./DataPipelineLiveViewer.css";
 import Papa from "papaparse";
 import CsvChart from "./CsvChart";
 
-const endpoints = {
-  kafkaIn: "http://localhost:8081/kafka/in",
-  agent: "http://localhost:8081/agent",
-  kafkaOut: "http://localhost:8081/kafka/out",
-};
+const endpoints = null; 
 
 const keyFromTs = (raw) => {
   const s = String(raw).trim();
@@ -62,10 +58,15 @@ export default function DataPipelineLiveViewer() {
     window.dispatchEvent(new CustomEvent("seriesSelected",   { detail: { id: nextId } }));
     window.dispatchEvent(new CustomEvent("seriesDataUpdated",{ detail: { id: nextId, rows: slice } }));
     const normalized = slice
-      .map(r => ({ x: keyFromTs(r.timestamp), var: toNum(r.var) }))
-      .filter(d => d.x && typeof d.var === "number")
-      .sort((a,b)=>a.x.localeCompare(b.x));
-    window.dispatchEvent(new CustomEvent("seriesChartData", { detail: { id: nextId, points: normalized } }));
+    .map(r => {
+      const iso = keyFromTs(r.timestamp);
+      const t   = Date.parse(iso);
+      const v   = toNum(r.var);
+      return Number.isFinite(t) && typeof v === "number" ? { x: iso, t, var: v } : null;
+    })
+    .filter(Boolean)
+    .sort((a,b)=>a.t - b.t);
+  window.dispatchEvent(new CustomEvent("seriesChartData", { detail: { id: nextId, points: normalized } }));
   };
 
   const triggerPipeline = async () => {
@@ -92,7 +93,8 @@ export default function DataPipelineLiveViewer() {
       alert(`Loader: ${loaderRows} filas | Predicciones (flush): ${flushed}`);
 
       // refrescar gráfico inferior (re-emitimos la base para el id actual)
-      const nextId = selectedId || ids[0];
+      const nextId = (selectedId && ids.includes(selectedId)) ? selectedId : (ids[0] || "");
+      setSelectedId(nextId);
       if (nextId) emitSelection(nextId);
       window.dispatchEvent(new Event("pipelineUpdated"));
     } catch (e) {
@@ -178,16 +180,9 @@ const chartData = selectedId
 
   const fetchData = async () => {
     try {
-      const safeFetch = (u) =>
-        fetch(u).then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
-      const [inJson, agentJson, outJson] = await Promise.all([
-        safeFetch(endpoints.kafkaIn),
-        safeFetch(endpoints.agent),
-        safeFetch(endpoints.kafkaOut),
-      ]);
-      setKafkaInData(inJson.messages || []);
-      setAgentLogs(agentJson.logs || []);
-      setKafkaOutData(outJson.messages || []);
+      setKafkaInData([]);
+      setAgentLogs([]);
+      setKafkaOutData([]);
     } catch { /* silent */ }
   };
 
