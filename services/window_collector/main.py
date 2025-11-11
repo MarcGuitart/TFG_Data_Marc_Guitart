@@ -75,7 +75,27 @@ def _key_tuple(rec: dict):
     return tuple(rec.get(f) for f in _key_fields) if _key_fields else (rec.get("timestamp"), rec.get("id"))
 
 def write_to_influx(rec):
-    unit = rec.get("id") or rec.get("unit_id") or "unknown"
+
+    # --- Predicciones por modelo (para evaluación individual)
+    per_model = rec.get("hyper_models")
+    if isinstance(per_model, dict):
+        try:
+            ts_pm = _parse_ts(rec.get("ts_pred")) or _shift_ts_to_today(rec.get("timestamp"))
+            for model_name, yhat_m in per_model.items():
+                _write_api.write(
+                    bucket=INFLUX_BUCKET,
+                    record=(
+                        Point("telemetry_models")
+                        .tag("id", unit)
+                        .tag("model", str(model_name))
+                        .field("yhat", float(yhat_m))
+                        .time(ts_pm, WritePrecision.S)
+                    ),
+                )
+        except Exception as e:
+            print(f"[collector] ❌ Error guardando telemetry_models: {e}")
+
+        unit = rec.get("id") or rec.get("unit_id") or "unknown"
 
     # Observado (mantienes el mapeo a HOY para demo)
     if "var" in rec:
