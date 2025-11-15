@@ -2,7 +2,9 @@ import React, { useEffect, useState } from "react";
 import "./DataPipelineLiveViewer.css";
 import Papa from "papaparse";
 import CsvChart from "./CsvChart";
+import MetricsPanel from "./MetricsPanel";
 
+const API_BASE = "http://localhost:8081";
 const endpoints = null; 
 
 const keyFromTs = (raw) => {
@@ -47,9 +49,14 @@ export default function DataPipelineLiveViewer() {
   const [agentLogs, setAgentLogs] = useState([]);
   const [kafkaOutData, setKafkaOutData] = useState([]);
 
-  const [rows, setRows] = useState([]);     // [{ id, timestamp, var }]
+  const [rows, setRows] = useState([]);     
   const [ids, setIds] = useState([]);
   const [selectedId, setSelectedId] = useState("");
+  const [metricsCombined, setMetricsCombined] = useState(null);
+  const [metricsModels, setMetricsModels] = useState(null);
+  const [metricsLoading, setMetricsLoading] = useState(false);
+  const [metricsError, setMetricsError] = useState(null);
+
   const [uploadError, setUploadError] = useState("");
   const [isRunning, setIsRunning] = useState(false);
 
@@ -70,39 +77,40 @@ export default function DataPipelineLiveViewer() {
   };
 
   const triggerPipeline = async () => {
-    if (isRunning) return;
-    setIsRunning(true);
-    try {
-      const fileInput = document.querySelector('input[type="file"]');
-      if (!fileInput?.files?.length) {
-        alert("Por favor selecciona un CSV antes de ejecutar el agente.");
-        return;
-      }
-      const formData = new FormData();
-      formData.append("file", fileInput.files[0]);
-
-      const up = await fetch("http://localhost:8081/api/upload_csv", { method: "POST", body: formData });
-      if (!up.ok) { alert("Falló /api/upload_csv"); return; }
-
-      const res  = await fetch("http://localhost:8081/api/run_window", { method: "POST" });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) { alert("Falló /api/run_window"); return; }
-
-      const loaderRows = json.loader_response?.rows ?? json.loader_rows ?? 0;
-      const flushed    = json.rows_flushed ?? 0;
-      alert(`Loader: ${loaderRows} filas | Predicciones (flush): ${flushed}`);
-
-      // refrescar gráfico inferior (re-emitimos la base para el id actual)
-      const nextId = (selectedId && ids.includes(selectedId)) ? selectedId : (ids[0] || "");
-      setSelectedId(nextId);
-      if (nextId) emitSelection(nextId);
-      window.dispatchEvent(new Event("pipelineUpdated"));
-    } catch (e) {
-      console.error(e); alert("Error al iniciar el pipeline");
-    } finally {
-      setIsRunning(false);
+  if (isRunning) return;
+  setIsRunning(true);
+  try {
+    const fileInput = document.querySelector('input[type="file"]');
+    if (!fileInput?.files?.length) {
+      alert("Por favor selecciona un CSV antes de ejecutar el agente.");
+      return;
     }
-  };
+    const formData = new FormData();
+    formData.append("file", fileInput.files[0]);
+
+    // 👇 usa API_BASE
+    const up = await fetch(`${API_BASE}/api/upload_csv`, { method: "POST", body: formData });
+    if (!up.ok) { alert("Falló /api/upload_csv"); return; }
+
+    const res  = await fetch(`${API_BASE}/api/run_window`, { method: "POST" });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) { alert("Falló /api/run_window"); return; }
+
+    const loaderRows = json.loader_response?.rows ?? json.loader_rows ?? 0;
+    const flushed    = json.rows_flushed ?? 0;
+    alert(`Loader: ${loaderRows} filas | Predicciones (flush): ${flushed}`);
+
+    const nextId = (selectedId && ids.includes(selectedId)) ? selectedId : (ids[0] || "");
+    setSelectedId(nextId);
+    if (nextId) emitSelection(nextId);
+    window.dispatchEvent(new Event("pipelineUpdated"));
+  } catch (e) {
+    console.error(e); alert("Error al iniciar el pipeline");
+  } finally {
+    setIsRunning(false);
+  }
+};
+
 
   const toEpochMs = (x) => {
    if (x instanceof Date) return x.getTime();
@@ -110,6 +118,41 @@ export default function DataPipelineLiveViewer() {
    const d = new Date(String(x).trim());
    return d.getTime();
  };
+
+async function handleLoadMetrics() {
+  if (!selectedId) return;
+  setMetricsLoading(true);
+  setMetricsError(null);
+
+  try {
+    const qs = encodeURIComponent(selectedId);
+    const [resCombined, resModels] = await Promise.all([
+      fetch(`${API_BASE}/api/metrics/combined?id=${qs}&start=-3d`),
+      fetch(`${API_BASE}/api/metrics/models?id=${qs}&start=-3d`)
+    ]);
+
+    if (!resCombined.ok) {
+      throw new Error(`combined ${resCombined.status}`);
+    }
+    if (!resModels.ok) {
+      throw new Error(`models ${resModels.status}`);
+    }
+
+    const dataCombined = await resCombined.json();
+    const dataModels = await resModels.json();
+
+    setMetricsCombined(dataCombined);
+    setMetricsModels(dataModels);
+  } catch (err) {
+    console.error("Error loading metrics", err);
+    setMetricsError(err.message || "Error loading metrics");
+    setMetricsCombined(null);
+    setMetricsModels(null);
+  } finally {
+    setMetricsLoading(false);
+  }
+}
+
 
   const handleFileUpload = (ev) => {
     const file = ev.target.files?.[0];
@@ -219,20 +262,27 @@ const chartData = selectedId
           ) : (
             <>
               {ids.length > 0 && (
-                <div style={{ marginBottom: 8 }}>
-                  <label style={{ marginRight: 8 }}>Series (id):</label>
+                <div className="controls" style={{ marginBottom: 8 }}>
+                  {/* selector de ID que ya tienes */}
                   <select
                     value={selectedId}
-                    onChange={(e) => {
-                      const nextId = e.target.value;
-                      setSelectedId(nextId);
-                      emitSelection(nextId);
-                    }}
+                    onChange={(e) => setSelectedId(e.target.value)}
                   >
+                    <option value="">Select ID…</option>
                     {ids.map((id) => (
-                      <option key={id} value={id}>{id}</option>
+                      <option key={id} value={id}>
+                        {id}
+                      </option>
                     ))}
                   </select>
+
+                  <button
+                    onClick={handleLoadMetrics}
+                    disabled={!selectedId || metricsLoading}
+                    style={{ marginLeft: "8px" }}
+                  >
+                    {metricsLoading ? "Loading metrics…" : "Load metrics"}
+                  </button>
                 </div>
               )}
               <CsvChart
@@ -246,6 +296,13 @@ const chartData = selectedId
                   <div key={i}>{JSON.stringify(row, null, 2)}</div>
                 ))}
               </pre>
+              <MetricsPanel
+                combined={metricsCombined}
+                models={metricsModels}
+                loading={metricsLoading}
+                error={metricsError}
+                selectedId={selectedId}
+              />
             </>
           )}
         </div>
