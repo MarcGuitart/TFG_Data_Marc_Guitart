@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from fastapi import APIRouter, Query, HTTPException
 from influxdb_client import InfluxDBClient
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 import logging
 
 # Reutiliza las mismas ENV que el resto del servicio
@@ -17,6 +18,19 @@ INFLUX_BUCKET = os.getenv("INFLUX_BUCKET", "pipeline")
 # Crea query_api aquí sin interferir con otros clientes que puedas tener
 _metrics_q = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG).query_api()
 app = FastAPI(title="orchestrator")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
 router_metrics = APIRouter(prefix="/api/metrics", tags=["metrics"])
 
 # Configura el logger

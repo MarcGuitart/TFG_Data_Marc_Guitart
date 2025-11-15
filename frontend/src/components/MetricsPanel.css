@@ -1,0 +1,50 @@
+.metrics-card {
+  margin-top: 16px;
+  padding: 16px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  background-color: #ffffff;
+}
+
+.metrics-title {
+  margin: 0 0 8px;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.metrics-subtitle {
+  margin: 16px 0 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.metrics-id {
+  font-family: monospace;
+}
+
+.metrics-text {
+  font-size: 0.9rem;
+  color: #4b5563;
+}
+
+.metrics-error {
+  font-size: 0.9rem;
+  color: #b91c1c;
+}
+
+.metrics-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.metrics-table th,
+.metrics-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid #e5e7eb;
+  text-align: left;
+}
+
+.metrics-table--small {
+  margin-top: 8px;
+}
