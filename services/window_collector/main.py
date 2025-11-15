@@ -75,6 +75,8 @@ def _key_tuple(rec: dict):
     return tuple(rec.get(f) for f in _key_fields) if _key_fields else (rec.get("timestamp"), rec.get("id"))
 
 def write_to_influx(rec):
+    # SIEMPRE define unit lo primero
+    unit = rec.get("id") or rec.get("unit_id") or "unknown"
 
     # --- Predicciones por modelo (para evaluación individual)
     per_model = rec.get("hyper_models")
@@ -95,14 +97,12 @@ def write_to_influx(rec):
         except Exception as e:
             print(f"[collector] ❌ Error guardando telemetry_models: {e}")
 
-        unit = rec.get("id") or rec.get("unit_id") or "unknown"
-
-    # Observado (mantienes el mapeo a HOY para demo)
+    # Observado…
     if "var" in rec:
         try:
             p = (
                 Point("telemetry")
-                .tag("id", unit)
+                .tag("id", unit) 
                 .field("var", float(rec["var"]))
                 .time(_shift_ts_to_today(rec.get("timestamp")), WritePrecision.S)
             )
