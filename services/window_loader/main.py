@@ -24,61 +24,63 @@ def _read_any(path: str) -> pd.DataFrame:
     ext = os.path.splitext(path)[-1].lower()
     if ext == ".csv":
         try:
-            df = pd.read_csv(path)
+            df = pd.read_csv(path, skipinitialspace=True)  # ← clave
         except UnicodeDecodeError:
             print("[loader] CSV no es UTF-8; reintento con latin-1…")
-            df = pd.read_csv(path, encoding="latin-1")
+            df = pd.read_csv(path, encoding="latin-1", skipinitialspace=True)
         except Exception as e:
             print(f"[loader] error leyendo CSV (primer intento): {e}")
-            # fallback: sin encabezado, 3 columnas esperadas
             df = pd.read_csv(path, header=None, names=["timestamp", "id", "var"])
             print("[loader] leído como CSV sin encabezado con columnas timestamp,id,var")
+        df.columns = [c.strip() for c in df.columns]       # ← asegura sin espacios
         df["__src_format"] = "csv"
         return df
     elif ext == ".parquet":
         df = pd.read_parquet(path)
+        df.columns = [c.strip() for c in df.columns]       # ← simetría
         df["__src_format"] = "parquet"
         return df
     else:
         raise ValueError(f"Formato no soportado: {ext}")
 
+
 def _normalize(df: pd.DataFrame) -> pd.DataFrame:
-    # renombres frecuentes
+    # 1) NORMALIZA CABECERAS
+    df.columns = [str(c).strip().lower() for c in df.columns] 
+
+    # 2) RENOMBRADOS COMUNES
     rename_map = {}
-    for src, dst in [("time","timestamp"), ("unit","id"), ("value","var"), ("category","id")]:
+    for src, dst in [("time","timestamp"), ("unit","id"), ("category","id"),
+                     ("value","var"), ("traffic","var"), ("count","var"), ("y","var")]:
         if src in df.columns and dst not in df.columns:
             rename_map[src] = dst
     if rename_map:
         df = df.rename(columns=rename_map)
 
-    # columnas mínimas
+    # 3) COLUMNAS MÍNIMAS
     required = ["timestamp", "id", "var"]
-    missing = [c for c in required if c not in df.columns]
-    if missing and len(df.columns) == 3:
-        print(f"[loader] normalizando columnas genéricas -> {required}")
-        df.columns = required
-        missing = []
-    if missing:
-        raise ValueError(f"Faltan columnas requeridas: {missing}; columnas={list(df.columns)}")
+    if set(required) - set(df.columns):
+        # fallback si trae exactamente 3 columnas con nombres raros:
+        if len(df.columns) == 3:
+            df.columns = required
+        else:
+            missing = [c for c in required if c not in df.columns]
+            raise ValueError(f"Faltan columnas requeridas: {missing}; columnas={list(df.columns)}")
 
-    # tipos / limpieza
+    # 4) TIPOS + LIMPIEZA
     df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
-    if df["timestamp"].isna().any():
-        bad = int(df["timestamp"].isna().sum())
-        print(f"[loader] WARNING: {bad} filas con timestamp inválido")
-    df["timestamp"] = df["timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S")
-
+    df["id"] = df["id"].astype(str).str.strip()     # 👈 recorta IDs
     df["var"] = pd.to_numeric(df["var"], errors="coerce")
-    df["id"] = df["id"].astype(str).str.strip()
 
     before = len(df)
     df = df.dropna(subset=["timestamp", "var"])
     if len(df) != before:
         print(f"[loader] descartadas {before-len(df)} filas por NaN en timestamp/var")
 
-    # orden global por timestamp (interleava múltiples ids, preserva temporalidad real)
+    df["timestamp"] = df["timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S")
     df = df.sort_values(by=["timestamp"], kind="stable").reset_index(drop=True)
     return df
+
 
 def _emit_dataframe(df: pd.DataFrame, speed_ms: int = 0):
     prod = _producer()
