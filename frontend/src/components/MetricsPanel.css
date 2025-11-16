@@ -4,6 +4,7 @@
   border-radius: 8px;
   border: 1px solid #e5e7eb;
   background-color: #ffffff;
+  color: #111827; 
 }
 
 .metrics-title {
@@ -24,7 +25,7 @@
 
 .metrics-text {
   font-size: 0.9rem;
-  color: #4b5563;
+  color: #000000;
 }
 
 .metrics-error {
