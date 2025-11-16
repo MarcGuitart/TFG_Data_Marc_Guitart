@@ -80,17 +80,12 @@ export default function DataPipelineLiveViewer() {
   if (isRunning) return;
   setIsRunning(true);
   try {
+    // Opcional: si quieres exigir que el usuario haya cargado un CSV solo para la parte visual:
     const fileInput = document.querySelector('input[type="file"]');
     if (!fileInput?.files?.length) {
       alert("Por favor selecciona un CSV antes de ejecutar el agente.");
       return;
     }
-    const formData = new FormData();
-    formData.append("file", fileInput.files[0]);
-
-    // 👇 usa API_BASE
-    const up = await fetch(`${API_BASE}/api/upload_csv`, { method: "POST", body: formData });
-    if (!up.ok) { alert("Falló /api/upload_csv"); return; }
 
     const res  = await fetch(`${API_BASE}/api/run_window`, { method: "POST" });
     const json = await res.json().catch(() => ({}));
@@ -105,11 +100,13 @@ export default function DataPipelineLiveViewer() {
     if (nextId) emitSelection(nextId);
     window.dispatchEvent(new Event("pipelineUpdated"));
   } catch (e) {
-    console.error(e); alert("Error al iniciar el pipeline");
+    console.error(e);
+    alert("Error al iniciar el pipeline");
   } finally {
     setIsRunning(false);
   }
 };
+
 
 
   const toEpochMs = (x) => {
