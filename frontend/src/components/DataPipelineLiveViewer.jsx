@@ -2,7 +2,9 @@ import React, { useEffect, useState } from "react";
 import "./DataPipelineLiveViewer.css";
 import Papa from "papaparse";
 import CsvChart from "./CsvChart";
+import MetricsPanel from "./MetricsPanel";
 
+const API_BASE = "http://localhost:8081";
 const endpoints = null; 
 
 const keyFromTs = (raw) => {
@@ -47,9 +49,14 @@ export default function DataPipelineLiveViewer() {
   const [agentLogs, setAgentLogs] = useState([]);
   const [kafkaOutData, setKafkaOutData] = useState([]);
 
-  const [rows, setRows] = useState([]);     // [{ id, timestamp, var }]
+  const [rows, setRows] = useState([]);     
   const [ids, setIds] = useState([]);
   const [selectedId, setSelectedId] = useState("");
+  const [metricsCombined, setMetricsCombined] = useState(null);
+  const [metricsModels, setMetricsModels] = useState(null);
+  const [metricsLoading, setMetricsLoading] = useState(false);
+  const [metricsError, setMetricsError] = useState(null);
+
   const [uploadError, setUploadError] = useState("");
   const [isRunning, setIsRunning] = useState(false);
 
@@ -70,39 +77,55 @@ export default function DataPipelineLiveViewer() {
   };
 
   const triggerPipeline = async () => {
-    if (isRunning) return;
-    setIsRunning(true);
-    try {
-      const fileInput = document.querySelector('input[type="file"]');
-      if (!fileInput?.files?.length) {
-        alert("Por favor selecciona un CSV antes de ejecutar el agente.");
-        return;
-      }
-      const formData = new FormData();
-      formData.append("file", fileInput.files[0]);
-
-      const up = await fetch("http://localhost:8081/api/upload_csv", { method: "POST", body: formData });
-      if (!up.ok) { alert("Falló /api/upload_csv"); return; }
-
-      const res  = await fetch("http://localhost:8081/api/run_window", { method: "POST" });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) { alert("Falló /api/run_window"); return; }
-
-      const loaderRows = json.loader_response?.rows ?? json.loader_rows ?? 0;
-      const flushed    = json.rows_flushed ?? 0;
-      alert(`Loader: ${loaderRows} filas | Predicciones (flush): ${flushed}`);
-
-      // refrescar gráfico inferior (re-emitimos la base para el id actual)
-      const nextId = (selectedId && ids.includes(selectedId)) ? selectedId : (ids[0] || "");
-      setSelectedId(nextId);
-      if (nextId) emitSelection(nextId);
-      window.dispatchEvent(new Event("pipelineUpdated"));
-    } catch (e) {
-      console.error(e); alert("Error al iniciar el pipeline");
-    } finally {
-      setIsRunning(false);
+  if (isRunning) return;
+  setIsRunning(true);
+  try {
+    const fileInput = document.querySelector('input[type="file"]');
+    if (!fileInput?.files?.length) {
+      alert("Por favor selecciona un CSV antes de ejecutar el agente.");
+      return;
     }
-  };
+
+    const formData = new FormData();
+    formData.append("file", fileInput.files[0]);
+
+    // 1) sube el CSV al backend -> /app/data/uploaded.csv
+    const up = await fetch(`${API_BASE}/api/upload_csv`, {
+      method: "POST",
+      body: formData,
+    });
+    if (!up.ok) {
+      console.error("upload_csv failed", await up.text().catch(() => ""));
+      alert("Falló /api/upload_csv");
+      return;
+    }
+
+    // 2) dispara el pipeline usando uploaded.csv
+    const res = await fetch(`${API_BASE}/api/run_window`, { method: "POST" });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      console.error("run_window failed", json);
+      alert("Falló /api/run_window");
+      return;
+    }
+
+    const loaderRows = json.loader_response?.rows ?? json.loader_rows ?? 0;
+    const flushed    = json.rows_flushed ?? 0;
+    alert(`Loader: ${loaderRows} filas | Predicciones (flush): ${flushed}`);
+
+    const nextId = (selectedId && ids.includes(selectedId)) ? selectedId : (ids[0] || "");
+    setSelectedId(nextId);
+    if (nextId) emitSelection(nextId);
+    window.dispatchEvent(new Event("pipelineUpdated"));
+  } catch (e) {
+    console.error(e);
+    alert("Error al iniciar el pipeline");
+  } finally {
+    setIsRunning(false);
+  }
+};
+
+
 
   const toEpochMs = (x) => {
    if (x instanceof Date) return x.getTime();
@@ -111,53 +134,179 @@ export default function DataPipelineLiveViewer() {
    return d.getTime();
  };
 
-  const handleFileUpload = (ev) => {
-    const file = ev.target.files?.[0];
-    if (!file) return;
-    setUploadError("");
+async function handleLoadMetrics() {
+  if (!selectedId) return;
+  setMetricsLoading(true);
+  setMetricsError(null);
 
-    Papa.parse(file, {
-      header: true, skipEmptyLines: true, dynamicTyping: true,
-      complete: (res) => {
-        try {
-          const raw = Array.isArray(res.data) ? res.data : [];
-          if (!raw.length) { setRows([]); setIds([]); setSelectedId(""); setUploadError("CSV vacío."); return; }
+  try {
+    const qs = encodeURIComponent(selectedId);
+    const [resCombined, resModels] = await Promise.all([
+      fetch(`${API_BASE}/api/metrics/combined?id=${qs}&start=-3d`),
+      fetch(`${API_BASE}/api/metrics/models?id=${qs}&start=-3d`)
+    ]);
 
-          const headers = Object.keys(raw[0]).map(h => String(h).trim().toLowerCase());
-          const idKey  = Object.keys(raw[0])[headers.indexOf("id")];
-          const tsKey  = Object.keys(raw[0])[headers.indexOf("timestamp")];
-          const varKey = Object.keys(raw[0])[headers.indexOf("var")];
-          if (!idKey || !tsKey || !varKey) {
-            setRows([]); setIds([]); setSelectedId("");
-            setUploadError(`Faltan columnas (id,timestamp,var). Encontradas: ${Object.keys(raw[0]).join(", ")}`);
-            return;
-          }
+    if (!resCombined.ok) {
+      throw new Error(`combined ${resCombined.status}`);
+    }
+    if (!resModels.ok) {
+      throw new Error(`models ${resModels.status}`);
+    }
 
-          const norm = raw
-            .filter(r => r[idKey] != null && r[tsKey] != null && r[varKey] != null)
-            .map(r => ({
-              id: String(r[idKey]).trim(),
-              timestamp: String(r[tsKey]).trim(),
-              var: toNum(r[varKey])
-            }))
-             .filter(r => typeof r.var === "number");
+    const dataCombined = await resCombined.json();
+    const dataModels = await resModels.json();
 
-          if (!norm.length) { setRows([]); setIds([]); setSelectedId(""); setUploadError("No hay filas válidas."); return; }
+    setMetricsCombined(dataCombined);
+    setMetricsModels(dataModels);
+  } catch (err) {
+    console.error("Error loading metrics", err);
+    setMetricsError(err.message || "Error loading metrics");
+    setMetricsCombined(null);
+    setMetricsModels(null);
+  } finally {
+    setMetricsLoading(false);
+  }
+}
 
-          setRows(norm);
-          const uniqIds = [...new Set(norm.map(r => r.id))];
-          setIds(uniqIds);
-          const nextId = uniqIds.includes(selectedId) ? selectedId : uniqIds[0];
-          setSelectedId(nextId);
-          // 💡 Enviamos al panel de abajo la base de datos (misma serie que “Uploaded Data”)
-          emitSelection(nextId, norm);
-        } catch (e) {
-          console.error(e); setUploadError("Error procesando el CSV.");
+
+  // helper interno: intento automático de detectar columnas de tiempo y valor
+  const autoDetectColumns = (rows) => {
+    if (!rows.length) return { tsKey: null, varKey: null };
+
+    const keys = Object.keys(rows[0]);
+    const stats = keys.map((key) => {
+      let dateScore = 0;
+      let numScore = 0;
+      let total = 0;
+
+      for (const r of rows.slice(0, 50)) { // mira sólo primeras 50 filas
+        const v = r[key];
+        if (v == null || v === "") continue;
+        total++;
+
+        // ¿parece fecha?
+        const d = new Date(String(v).trim());
+        if (!Number.isNaN(d.getTime())) {
+          dateScore++;
         }
-      },
-      error: (err) => { console.error(err); setUploadError("Error leyendo el archivo CSV."); },
+
+        // ¿parece número?
+        const n = toNum(v);
+        if (typeof n === "number") {
+          numScore++;
+        }
+      }
+
+      return { key, dateScore, numScore, total };
     });
+
+    // columna candidata a timestamp: la que tenga muchos parseos de fecha
+    const bestDate = stats
+      .filter(s => s.dateScore >= 3 && s.dateScore >= s.total * 0.6)
+      .sort((a, b) => b.dateScore - a.dateScore)[0];
+
+    // columna candidata a valor: la que tenga muchos numéricos
+    const bestNum = stats
+      .filter(s => s.numScore >= 3 && s.numScore >= s.total * 0.6)
+      .sort((a, b) => b.numScore - a.numScore)[0];
+
+    return {
+      tsKey: bestDate?.key ?? null,
+      varKey: bestNum?.key ?? null,
+    };
+  };
+
+  const handleFileUpload = (ev) => {
+  const file = ev.target.files?.[0];
+  if (!file) return;
+  setUploadError("");
+
+  Papa.parse(file, {
+    header: true,
+    skipEmptyLines: true,
+    dynamicTyping: true,
+    complete: (res) => {
+      try {
+        const raw = Array.isArray(res.data) ? res.data : [];
+        if (!raw.length) {
+          setRows([]); setIds([]); setSelectedId("");
+          setUploadError("CSV vacío.");
+          return;
+        }
+
+        const headers = Object.keys(raw[0]).map(h => String(h).trim().toLowerCase());
+
+        // intenta detectar ID
+        let idKey = Object.keys(raw[0])[headers.indexOf("id")] ?? null;
+
+        // timestamp flexible (primera pasada por nombre)
+        let tsKey =
+          Object.keys(raw[0])[headers.indexOf("timestamp")] ||
+          Object.keys(raw[0])[headers.indexOf("ts")] ||
+          Object.keys(raw[0])[headers.indexOf("time")] ||
+          null;
+
+        // valor flexible (primera pasada por nombre)
+        let varKey =
+          Object.keys(raw[0])[headers.indexOf("var")] ||
+          Object.keys(raw[0])[headers.indexOf("value")] ||
+          Object.keys(raw[0])[headers.indexOf("y")] ||
+          Object.keys(raw[0])[headers.indexOf("val")] ||
+          null;
+
+        // 🔁 Si no hemos encontrado timestamp o var por nombre, intentamos autodetección
+        if (!tsKey || !varKey) {
+          const autodetected = autoDetectColumns(raw);
+          tsKey = tsKey || autodetected.tsKey;
+          varKey = varKey || autodetected.varKey;
+        }
+
+        if (!tsKey || !varKey) {
+          setRows([]); setIds([]); setSelectedId("");
+          setUploadError(
+            `CSV no válido. No se han podido detectar columnas de tiempo y valor.\n` +
+            `Cabeceras: ${Object.keys(raw[0]).join(", ")}`
+          );
+          return;
+        }
+
+        const norm = raw
+          .map(r => {
+            const id = idKey ? String(r[idKey]).trim() : "default";
+            const ts = String(r[tsKey]).trim();
+            const v  = toNum(r[varKey]);
+
+            return (ts && typeof v === "number")
+              ? { id, timestamp: ts, var: v }
+              : null;
+          })
+          .filter(Boolean);
+
+        if (!norm.length) {
+          setRows([]); setIds([]); setSelectedId("");
+          setUploadError("No hay filas válidas (timestamps o valores no parseables).");
+          return;
+        }
+
+        setRows(norm);
+        const uniqIds = [...new Set(norm.map(r => r.id))];
+        setIds(uniqIds);
+
+        const nextId = uniqIds.includes(selectedId) ? selectedId : uniqIds[0];
+        setSelectedId(nextId);
+        emitSelection(nextId, norm);
+      } catch (e) {
+        console.error(e);
+        setUploadError("Error procesando el CSV.");
+      }
+    },
+    error: (err) => {
+      console.error(err);
+      setUploadError("Error leyendo el archivo CSV.");
+    },
+  });
 };
+
 
 const chartData = selectedId
     ? rows
@@ -219,20 +368,27 @@ const chartData = selectedId
           ) : (
             <>
               {ids.length > 0 && (
-                <div style={{ marginBottom: 8 }}>
-                  <label style={{ marginRight: 8 }}>Series (id):</label>
+                <div className="controls" style={{ marginBottom: 8 }}>
+                  {/* selector de ID que ya tienes */}
                   <select
                     value={selectedId}
-                    onChange={(e) => {
-                      const nextId = e.target.value;
-                      setSelectedId(nextId);
-                      emitSelection(nextId);
-                    }}
+                    onChange={(e) => setSelectedId(e.target.value)}
                   >
+                    <option value="">Select ID…</option>
                     {ids.map((id) => (
-                      <option key={id} value={id}>{id}</option>
+                      <option key={id} value={id}>
+                        {id}
+                      </option>
                     ))}
                   </select>
+
+                  <button
+                    onClick={handleLoadMetrics}
+                    disabled={!selectedId || metricsLoading}
+                    style={{ marginLeft: "8px" }}
+                  >
+                    {metricsLoading ? "Loading metrics…" : "Load metrics"}
+                  </button>
                 </div>
               )}
               <CsvChart
@@ -246,6 +402,13 @@ const chartData = selectedId
                   <div key={i}>{JSON.stringify(row, null, 2)}</div>
                 ))}
               </pre>
+              <MetricsPanel
+                combined={metricsCombined}
+                models={metricsModels}
+                loading={metricsLoading}
+                error={metricsError}
+                selectedId={selectedId}
+              />
             </>
           )}
         </div>
