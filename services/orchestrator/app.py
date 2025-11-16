@@ -5,7 +5,10 @@ from decimal import Decimal
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter, Query, HTTPException
 from influxdb_client import InfluxDBClient
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
+import csv
+from io import StringIO
 import logging
 
 # Reutiliza las mismas ENV que el resto del servicio
@@ -17,6 +20,19 @@ INFLUX_BUCKET = os.getenv("INFLUX_BUCKET", "pipeline")
 # Crea query_api aquí sin interferir con otros clientes que puedas tener
 _metrics_q = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG).query_api()
 app = FastAPI(title="orchestrator")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
 router_metrics = APIRouter(prefix="/api/metrics", tags=["metrics"])
 
 # Configura el logger
@@ -69,6 +85,49 @@ import "math"
 
 // models helper (deprecated)
 '''
+
+
+@app.get("/api/series")
+def get_series(
+    id: str = Query(..., description="series id"),
+    hours: int = Query(24, ge=1, le=24*365)
+):
+    """
+    Devuelve la serie observada (var) y la predicha (prediction)
+    alineadas temporalmente en la última ventana de `hours` horas.
+    """
+    # usamos ventana relativa tipo -24h, -169h, etc.
+    start = f"-{hours}h"
+
+    try:
+        var_series = _query_field("telemetry", id, "var", start)
+        pred_series = _query_field("telemetry", id, "prediction", start)
+    except Exception as e:
+        logger.exception("Failed to query series for /api/series")
+        raise HTTPException(status_code=502, detail=f"influx query failed: {e}")
+
+    aligned = _align_by_time(var_series, pred_series, tol_seconds=120)
+
+    observed = []
+    predicted = []
+    for p in aligned:
+        ts_iso = p["time"].isoformat()
+        observed.append({
+            "t": ts_iso,
+            "y": p["a"],       # valor real (var)
+        })
+        predicted.append({
+            "t": ts_iso,
+            "y_hat": p["b"],   # predicción híbrida (prediction)
+        })
+
+    payload = {
+        "id": id,
+        "observed": observed,
+        "predicted": predicted,
+    }
+    return JSONResponse(content=_sanitize_numbers(payload))
+
 
 
 def _query_field(measurement: str, id_: str, field: str, start: str) -> List[Dict[str, Any]]:
@@ -293,7 +352,7 @@ def run_window():
     # 2) dispara loader con CSV de pruebas
     # Ajusta el nombre al que tengas en ../data dentro del repo
     payload = {
-        "source": "dades_traffic.csv",  # Usa el archivo real que existe en /app/data/
+        "source": "uploaded.csv",  
         "speed_ms": 0
     }
     try:
@@ -304,3 +363,33 @@ def run_window():
         raise HTTPException(status_code=500, detail=f"loader trigger failed: {e}")
 
     return {"loader_response": data}
+
+
+# Uploads
+UPLOAD_DIR = "/app/data"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
+@app.post("/api/upload_csv")
+async def upload_csv(file: UploadFile = File(...)):
+    if not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Only CSV files are allowed")
+
+    dest_path = os.path.join(UPLOAD_DIR, "uploaded.csv")  # <-- nombre fijo
+    contents = await file.read()
+    with open(dest_path, "wb") as f:
+        f.write(contents)
+
+    # contar filas de forma barata
+    try:
+        text = contents.decode("utf-8", errors="ignore").splitlines()
+        reader = csv.DictReader(text)
+        rows = sum(1 for _ in reader)
+    except Exception:
+        rows = None
+
+    return {
+        "filename": "uploaded.csv",
+        "path": dest_path,
+        "rows": rows,
+    }
