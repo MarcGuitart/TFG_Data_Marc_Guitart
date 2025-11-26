@@ -87,46 +87,243 @@ import "math"
 '''
 
 
+def _query_models_yhat(id_: str, start: str) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Devuelve para un id dado todas las series yhat por modelo desde telemetry_models:
+      { model_name: [ {time, value}, ... ], ... }
+    """
+    flux_yhat = f'''from(bucket:"{INFLUX_BUCKET}")
+  |> range(start:{start})
+  |> filter(fn:(r)=> r._measurement=="telemetry_models" and r.id=="{id_}" and r._field=="yhat")
+  |> keep(columns:["_time","_value","model"])'''
+    logger.debug("Flux yhat all models (for series):\n%s", flux_yhat)
+    try:
+        tabs = _metrics_q.query(org=INFLUX_ORG, query=flux_yhat)
+    except Exception as e:
+        logger.exception("Influx query failed for yhat all models (series)")
+        raise
+
+    yhat_by_model: Dict[str, List[Dict[str, Any]]] = {}
+    for t in tabs:
+        for r in t.records:
+            model = r.values.get("model")
+            v = r.values.get("_value")
+            if model is None or v is None:
+                continue
+            try:
+                yhat_by_model.setdefault(model, []).append({
+                    "time": r.get_time(),
+                    "value": float(v),
+                })
+            except Exception:
+                continue
+
+    # Ordenar cada serie por tiempo
+    for series in yhat_by_model.values():
+        series.sort(key=lambda x: x["time"])
+    return yhat_by_model
+
+
+def _query_chosen_model(id_: str, start: str) -> List[Dict[str, Any]]:
+    """
+    Devuelve la serie de modelos elegidos (AP2 - modo adaptativo):
+      [ {time: datetime, model: str}, ... ]
+    """
+    flux_chosen = f'''from(bucket:"{INFLUX_BUCKET}")
+  |> range(start:{start})
+  |> filter(fn:(r)=> r._measurement=="chosen_model" and r.id=="{id_}" and r._field=="model")
+  |> keep(columns:["_time","_value"])'''
+    logger.debug("Flux chosen model:\n%s", flux_chosen)
+    try:
+        tabs = _metrics_q.query(org=INFLUX_ORG, query=flux_chosen)
+    except Exception as e:
+        logger.exception("Influx query failed for chosen_model")
+        raise
+
+    chosen = []
+    for t in tabs:
+        for r in t.records:
+            v = r.values.get("_value")
+            if v is None:
+                continue
+            try:
+                chosen.append({
+                    "time": r.get_time(),
+                    "model": str(v),
+                })
+            except Exception:
+                continue
+
+    # Ordenar por tiempo
+    chosen.sort(key=lambda x: x["time"])
+    return chosen
+
+
+def _query_weights(id_: str, start: str = "-7d"):
+    """
+    AP3: Consulta la evolución de pesos por modelo desde InfluxDB.
+    Measurement: weights
+    Tags: id, model
+    Field: weight (float)
+    
+    Returns:
+      {
+        "model_name": [ {time: datetime, weight: float}, ... ],
+        ...
+      }
+    """
+    flux_weights = f'''from(bucket:"{INFLUX_BUCKET}")
+  |> range(start:{start})
+  |> filter(fn:(r)=> r._measurement=="weights" and r.id=="{id_}" and r._field=="weight")
+  |> keep(columns:["_time","_value","model"])'''
+    logger.debug("Flux weights:\n%s", flux_weights)
+    try:
+        tabs = _metrics_q.query(org=INFLUX_ORG, query=flux_weights)
+    except Exception as e:
+        logger.exception("Influx query failed for weights")
+        raise
+
+    weights_by_model = {}
+    for t in tabs:
+        for r in t.records:
+            model_name = r.values.get("model")
+            weight_val = r.values.get("_value")
+            if model_name is None or weight_val is None:
+                continue
+            try:
+                if model_name not in weights_by_model:
+                    weights_by_model[model_name] = []
+                weights_by_model[model_name].append({
+                    "time": r.get_time(),
+                    "weight": float(weight_val),
+                })
+            except Exception:
+                continue
+
+    # Ordenar cada serie por tiempo
+    for model_name in weights_by_model:
+        weights_by_model[model_name].sort(key=lambda x: x["time"])
+    
+    return weights_by_model
+
+
 @app.get("/api/series")
 def get_series(
     id: str = Query(..., description="series id"),
     hours: int = Query(24, ge=1, le=24*365)
 ):
     """
-    Devuelve la serie observada (var) y la predicha (prediction)
-    alineadas temporalmente en la última ventana de `hours` horas.
+    Devuelve la serie observada (var), la predicha híbrida (prediction),
+    las predicciones por modelo, y el modelo elegido en cada instante (AP2).
     """
-    # usamos ventana relativa tipo -24h, -169h, etc.
     start = f"-{hours}h"
 
     try:
         var_series = _query_field("telemetry", id, "var", start)
         pred_series = _query_field("telemetry", id, "prediction", start)
+        yhat_by_model = _query_models_yhat(id, start)
+        chosen_series = _query_chosen_model(id, start)  # AP2: modelo elegido
+        weights_by_model = _query_weights(id, start)    # AP3: pesos por modelo
+        logger.info(f"[/api/series] id={id} var_series={len(var_series)} pred_series={len(pred_series)} yhat_by_model keys={list(yhat_by_model.keys())} chosen={len(chosen_series)} weights={list(weights_by_model.keys())}")
     except Exception as e:
         logger.exception("Failed to query series for /api/series")
         raise HTTPException(status_code=502, detail=f"influx query failed: {e}")
 
-    aligned = _align_by_time(var_series, pred_series, tol_seconds=120)
+    # 1) Alineamos var y prediction híbrida como antes
+    aligned_main = _align_by_time(var_series, pred_series, tol_seconds=120)
+
+    # 2) Alineamos var con cada modelo por separado
+    aligned_models: Dict[str, List[Dict[str, Any]]] = {}
+    for model, series in yhat_by_model.items():
+        aligned_models[model] = _align_by_time(var_series, series, tol_seconds=120)
+
+    # 3) Construimos índices por timestamp para poder fusionar todo
+    from collections import defaultdict
+    import datetime
+
+    # map tiempo -> {a: var, combined: pred_hibrida, models: {name: yhat}}
+    bucket: Dict[datetime.datetime, Dict[str, Any]] = {}
+
+    def _ensure_bucket(t):
+        if t not in bucket:
+            bucket[t] = {"models": {}}
+        return bucket[t]
+
+    # var + prediction híbrida
+    for p in aligned_main:
+        t = p["time"]
+        b = _ensure_bucket(t)
+        b["a"] = p["a"]        # var
+        b["combined"] = p["b"] # prediction híbrida
+
+    # por modelo
+    for model, aligned in aligned_models.items():
+        for p in aligned:
+            t = p["time"]
+            b = _ensure_bucket(t)
+            # a debería ser el mismo valor real, si no existe aún lo ponemos
+            if "a" not in b:
+                b["a"] = p["a"]
+            b["models"][model] = p["b"]
+
+    # 4) Ordenamos por tiempo y construimos payloads
+    times_sorted = sorted(bucket.keys())
 
     observed = []
     predicted = []
-    for p in aligned:
-        ts_iso = p["time"].isoformat()
-        observed.append({
-            "t": ts_iso,
-            "y": p["a"],       # valor real (var)
-        })
-        predicted.append({
-            "t": ts_iso,
-            "y_hat": p["b"],   # predicción híbrida (prediction)
-        })
+    models_payload: Dict[str, List[Dict[str, Any]]] = {m: [] for m in yhat_by_model.keys()}
+    points = []
+    chosen_models = []  # AP2: lista de modelos elegidos por timestamp
+
+    # Crear índice de modelo elegido por tiempo
+    chosen_by_time = {c["time"]: c["model"] for c in chosen_series}
+
+    for t in times_sorted:
+        b = bucket[t]
+        ts_iso = t.isoformat()
+        a_val = b.get("a")
+        c_val = b.get("combined")
+        chosen = chosen_by_time.get(t)  # Modelo elegido en este timestamp
+
+        # lista clásica como ya tenías
+        if a_val is not None:
+            observed.append({"t": ts_iso, "y": a_val})
+        if c_val is not None:
+            predicted.append({"t": ts_iso, "y_hat": c_val})
+
+        # por modelo
+        for model, yhat in b["models"].items():
+            models_payload.setdefault(model, []).append({
+                "t": ts_iso,
+                "y_hat": yhat
+            })
+
+        # AP2: modelo elegido
+        if chosen:
+            chosen_models.append({"t": ts_iso, "model": chosen})
+
+        # punto plano para CsvChart
+        point = {
+            "t": int(t.timestamp() * 1000),  # epoch ms
+            "var": a_val,
+            "prediction": c_val,
+            "chosen_model": chosen,  # AP2: agregar modelo elegido
+        }
+        for model, yhat in b["models"].items():
+            point[model] = yhat
+        points.append(point)
 
     payload = {
         "id": id,
         "observed": observed,
-        "predicted": predicted,
+        "predicted": predicted,       # híbrida
+        "models": models_payload,     # por modelo
+        "chosen_models": chosen_models,  # AP2: modelo elegido por timestamp
+        "weights": weights_by_model,  # AP3: pesos por modelo
+        "points": points,             # listo para CsvChart
     }
     return JSONResponse(content=_sanitize_numbers(payload))
+
 
 
 

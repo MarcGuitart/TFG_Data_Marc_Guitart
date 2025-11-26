@@ -17,20 +17,20 @@ class KalmanModel(BaseModel):
         super().__init__(name, **kwargs)
         dt = float(self.cfg.get("dt", 1.0))
         self.F = np.array([[1, dt],
-                           [0,  1 ]], dtype=float)         # dinámica
-        self.H = np.array([[1, 0]], dtype=float)           # medimos x
+                           [0,  1 ]], dtype=float)         
+        self.H = np.array([[1, 0]], dtype=float)           
         q_pos = float(self.cfg.get("q_pos", 1e-3))
         q_vel = float(self.cfg.get("q_vel", 1e-3))
         self.Q = np.array([[q_pos, 0],
-                           [0,    q_vel]], dtype=float)    # proceso
+                           [0,    q_vel]], dtype=float)    
         r = float(self.cfg.get("r", 1e-2))
-        self.R = np.array([[r]], dtype=float)              # medición
+        self.R = np.array([[r]], dtype=float)              
 
         x0 = float(self.cfg.get("x0", 0.0))
         v0 = float(self.cfg.get("v0", 0.0))
         p0 = float(self.cfg.get("p0", 1.0))
-        self.x = np.array([[x0],[v0]], dtype=float)        # estado
-        self.P = np.eye(2) * p0                            # covarianza
+        self.x = np.array([[x0],[v0]], dtype=float)        
+        self.P = np.eye(2) * p0                           
 
         self.dt = dt
 
