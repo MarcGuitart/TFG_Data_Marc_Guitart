@@ -83,6 +83,7 @@ LEARN_PERIOD_SEC    = int(os.getenv("LEARN_PERIOD_SEC", "86400"))
 HYPER_CFG_PATH = os.getenv("HYPERMODEL_CONFIG", "/app/hypermodel/model_config.json")
 HYPER_DECAY    = float(os.getenv("HYPERMODEL_DECAY", "0.95"))
 HYPER_W_CAP    = float(os.getenv("HYPERMODEL_W_CAP", "10.0"))
+HYPER_MODE     = os.getenv("HYPERMODEL_MODE", "adaptive")  # "weighted" o "adaptive"
 BUFFER_LEN     = int(os.getenv("BUFFER_LEN", "32"))  # tamaño ventana por id
 
 # === HTTP app (health) ===
@@ -237,10 +238,10 @@ def get_hyper_for(unit_id: str) -> HyperModel:
     hm = hyper_by_id.get(unit_id)
     if hm is None:
         # instanciamos un HyperModel por id para que los pesos sean independientes por flujo
-        hm = HyperModel(cfg_path=HYPER_CFG_PATH, decay=HYPER_DECAY, w_cap=HYPER_W_CAP)
+        hm = HyperModel(cfg_path=HYPER_CFG_PATH, decay=HYPER_DECAY, w_cap=HYPER_W_CAP, mode=HYPER_MODE)
         hyper_by_id[unit_id] = hm
-        log.info("[hypermodel] creado para id=%s (cfg=%s, decay=%.3f, w_cap=%.1f)",
-                 unit_id, HYPER_CFG_PATH, HYPER_DECAY, HYPER_W_CAP)
+        log.info("[hypermodel] creado para id=%s (cfg=%s, decay=%.3f, w_cap=%.1f, mode=%s)",
+                 unit_id, HYPER_CFG_PATH, HYPER_DECAY, HYPER_W_CAP, HYPER_MODE)
     return hm
 
 # === MAIN LOOP ===
@@ -287,10 +288,11 @@ def main():
 
 
             # --- actualizar pesos con la VERDAD del tick anterior (si existía pred previa)
+            best_model = None
             if unit in last_pred_by_id and y_real is not None:
                 hm = get_hyper_for(unit)
                 try:
-                    hm.update_weights(float(y_real))
+                    best_model = hm.update_weights(float(y_real))
                 except Exception as e:
                     log.warning("[hypermodel] update_weights error: %s", e)
 
@@ -305,6 +307,8 @@ def main():
             hm = get_hyper_for(unit)
             y_hat, preds_by_model = hm.predict(list(buf))
             weights = hm.export_state()
+            chosen_model = hm.get_chosen_model()  # Modelo elegido (modo adaptive)
+            last_errors = hm.get_last_errors()     # Errores del último step
             last_pred_by_id[unit] = y_hat
 
             log.info("[pred-ts] base=%s ts_pred=%s delta_min=%.1f",
@@ -326,12 +330,14 @@ def main():
             enriched["hyper_y_hat"] = float(y_hat)
             enriched["hyper_models"] = preds_by_model
             enriched["hyper_weights"] = weights
+            enriched["hyper_chosen"] = chosen_model       # Modelo elegido (AP2)
+            enriched["hyper_errors"] = last_errors        # Errores por modelo (AP2)
 
             producer.send(TOUT, enriched)
             producer.flush()
 
-            log.info("[pred] id=%s y=%s y_hat=%.6f buf=%d models=%s",
-                     unit, str(y_real), y_hat, len(buf), ",".join(preds_by_model.keys()))
+            log.info("[pred] id=%s y=%s y_hat=%.6f buf=%d models=%s chosen=%s",
+                     unit, str(y_real), y_hat, len(buf), ",".join(preds_by_model.keys()), chosen_model or "N/A")
 
             # 5) Pequeño efecto demo (tu lógica original)
             if FLAVOR != "training" and "v1" in rec:
