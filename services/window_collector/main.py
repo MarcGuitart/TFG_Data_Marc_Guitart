@@ -146,6 +146,23 @@ def write_to_influx(rec):
         except Exception as e:
             print(f"[collector] ❌ Error guardando weights: {e}")
 
+    # Modelo elegido (AP2 - modo adaptativo)
+    chosen_model = rec.get("hyper_chosen")
+    if chosen_model:
+        try:
+            tsc = _parse_ts(rec.get("ts_pred")) or _shift_ts_to_today(rec.get("timestamp"))
+            _write_api.write(
+                bucket=INFLUX_BUCKET,
+                record=(
+                    Point("chosen_model")
+                    .tag("id", unit)
+                    .field("model", str(chosen_model))
+                    .time(tsc, WritePrecision.S)
+                ),
+            )
+        except Exception as e:
+            print(f"[collector] ❌ Error guardando chosen_model: {e}")
+
 
 
 def run_consumer():
