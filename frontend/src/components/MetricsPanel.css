@@ -49,3 +49,39 @@
 .metrics-table--small {
   margin-top: 8px;
 }
+
+/* AP4: Estilos para tabla de top-3 modelos */
+.metrics-table--ap4 {
+  margin-top: 8px;
+}
+
+.metrics-table--ap4 thead {
+  background-color: #f0f4f8;
+}
+
+.metrics-table--ap4 th {
+  background-color: #e8f1ff;
+  color: #1e40af;
+  font-weight: 700;
+}
+
+.metrics-row--best {
+  background-color: #fef3c7;
+}
+
+.metrics-rank {
+  text-align: center;
+  font-size: 1rem;
+}
+
+.metrics-model-name {
+  font-family: monospace;
+  font-weight: 600;
+}
+
+.metrics-weight {
+  color: #00a3ff;
+  font-weight: 700;
+  text-align: right;
+}
+
