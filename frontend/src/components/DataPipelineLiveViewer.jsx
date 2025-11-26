@@ -46,8 +46,6 @@ const toDate = (v) => {
 
 export default function DataPipelineLiveViewer() {
   const [kafkaInData, setKafkaInData] = useState([]);
-  const [agentLogs, setAgentLogs] = useState([]);
-  const [kafkaOutData, setKafkaOutData] = useState([]);
 
   const [rows, setRows] = useState([]);     
   const [ids, setIds] = useState([]);
@@ -133,6 +131,23 @@ export default function DataPipelineLiveViewer() {
    const d = new Date(String(x).trim());
    return d.getTime();
  };
+
+  const [backendSeries, setBackendSeries] = useState(null);
+
+async function loadBackendSeries() {
+  if (!selectedId) return;
+  const qs = encodeURIComponent(selectedId);
+  const res = await fetch(`${API_BASE}/api/series?id=${qs}&hours=24`);
+  if (!res.ok) {
+    console.error("Error /api/series", await res.text().catch(() => ""));
+    return;
+  }
+  const data = await res.json();
+  console.log("[loadBackendSeries] Received data:", data);
+  console.log("[loadBackendSeries] Points count:", data.points?.length ?? 0);
+  setBackendSeries(data);
+}
+
 
 async function handleLoadMetrics() {
   if (!selectedId) return;
@@ -330,8 +345,6 @@ const chartData = selectedId
   const fetchData = async () => {
     try {
       setKafkaInData([]);
-      setAgentLogs([]);
-      setKafkaOutData([]);
     } catch { /* silent */ }
   };
 
@@ -343,8 +356,6 @@ const chartData = selectedId
 
   return (
     <div className="viewer-container">
-      <h1>Data Pipeline Live Viewer</h1>
-
       <div className="viewer-grid">
         <Section title="Kafka In" data={kafkaInData}>
           <div style={{ marginTop: 8 }}>
@@ -358,9 +369,6 @@ const chartData = selectedId
           </div>
         </Section>
 
-        <Section title="Agent Logs" data={agentLogs} />
-        <Section title="Kafka Out" data={kafkaOutData} />
-
         <div className="section">
           <h2>Uploaded Data</h2>
           {rows.length === 0 ? (
@@ -369,7 +377,6 @@ const chartData = selectedId
             <>
               {ids.length > 0 && (
                 <div className="controls" style={{ marginBottom: 8 }}>
-                  {/* selector de ID que ya tienes */}
                   <select
                     value={selectedId}
                     onChange={(e) => setSelectedId(e.target.value)}
@@ -381,6 +388,10 @@ const chartData = selectedId
                       </option>
                     ))}
                   </select>
+
+                  <button onClick={loadBackendSeries} disabled={!selectedId}>
+                    Load backend series (per-model)
+                  </button>
 
                   <button
                     onClick={handleLoadMetrics}
@@ -397,6 +408,264 @@ const chartData = selectedId
                   .filter(d => Number.isFinite(d.t))
                 }
               />
+
+              {backendSeries && (
+                <>
+                  <h3 style={{ color: "#00A3FF", marginTop: 20 }}>
+                    📊 Backend Series (Per-Model Predictions)
+                  </h3>
+                  {backendSeries.points && backendSeries.points.length > 0 ? (
+                    <>
+                      <div style={{ 
+                        fontSize: 13, 
+                        color: "#999", 
+                        marginBottom: 12,
+                        padding: "8px 12px",
+                        background: "#1a1a1a",
+                        borderRadius: "6px",
+                        border: "1px solid #333"
+                      }}>
+                        <div><strong>ID:</strong> {selectedId}</div>
+                        <div><strong>Points:</strong> {backendSeries.points.length}</div>
+                        <div><strong>Models:</strong> {Object.keys(backendSeries.models || {}).join(", ") || "ninguno"}</div>
+                      </div>
+
+                      {/* Gráfico combinado - TODOS los modelos juntos */}
+                      <div style={{ marginBottom: 20 }}>
+                        <h4 style={{ color: "#00A3FF", fontSize: 14, marginBottom: 8 }}>
+                          🔀 Vista Combinada (Todos los Modelos)
+                        </h4>
+                        <p style={{ fontSize: 11, color: "#888", marginBottom: 8 }}>
+                          💡 <em>Real</em> (blue) · <em>Combined Pred</em> (orange dashed) · <em>Models</em> (colored)
+                        </p>
+                        <CsvChart data={backendSeries.points} />
+                      </div>
+
+                      {/* AP2: Tabla de modelos elegidos */}
+                      {backendSeries.chosen_models && backendSeries.chosen_models.length > 0 && (
+                        <div style={{
+                          marginTop: 20,
+                          marginBottom: 20,
+                          padding: "12px",
+                          background: "#1a1a1a",
+                          borderRadius: "8px",
+                          border: "2px solid #00A3FF40"
+                        }}>
+                          <h4 style={{ color: "#00A3FF", fontSize: 14, marginBottom: 12 }}>
+                            🎯 Selector Adaptativo - Modelo Elegido por Instante
+                          </h4>
+                          <p style={{ fontSize: 11, color: "#888", marginBottom: 12 }}>
+                            Muestra qué modelo fue seleccionado en cada timestamp (modo adaptativo: elige el de menor error)
+                          </p>
+                          <div style={{ 
+                            maxHeight: "200px", 
+                            overflowY: "auto",
+                            fontSize: 12,
+                            fontFamily: "monospace"
+                          }}>
+                            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                              <thead style={{ position: "sticky", top: 0, background: "#1a1a1a" }}>
+                                <tr>
+                                  <th style={{ textAlign: "left", padding: "6px", borderBottom: "1px solid #333", color: "#00A3FF" }}>
+                                    Timestamp
+                                  </th>
+                                  <th style={{ textAlign: "left", padding: "6px", borderBottom: "1px solid #333", color: "#00A3FF" }}>
+                                    Modelo Elegido
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {backendSeries.chosen_models.slice(-20).reverse().map((c, idx) => {
+                                  const modelColors = {
+                                    'ab_fast': '#10B981',
+                                    'linear_8': '#6366F1', 
+                                    'poly2_12': '#EC4899',
+                                  };
+                                  const color = modelColors[c.model] || '#999';
+                                  return (
+                                    <tr key={idx}>
+                                      <td style={{ padding: "4px 6px", borderBottom: "1px solid #222", color: "#ccc" }}>
+                                        {new Date(c.t).toLocaleString()}
+                                      </td>
+                                      <td style={{ 
+                                        padding: "4px 6px", 
+                                        borderBottom: "1px solid #222",
+                                        color: color,
+                                        fontWeight: 600
+                                      }}>
+                                        {c.model}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                          <div style={{ marginTop: 8, fontSize: 11, color: "#666" }}>
+                            Mostrando últimos 20 puntos · Total: {backendSeries.chosen_models.length}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* AP3: Panel de Evolución de Pesos */}
+                      {backendSeries.weights && Object.keys(backendSeries.weights).length > 0 && (
+                        <div style={{ marginTop: 30 }}>
+                          <h4 style={{ color: "#00A3FF", fontSize: 14, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+                            <span>⚖️ Evolución de Pesos (AP3 - Sistema de Ranking)</span>
+                          </h4>
+                          <div style={{ 
+                            padding: "16px", 
+                            background: "#1a1a1a", 
+                            borderRadius: "8px",
+                            border: "1px solid #333"
+                          }}>
+                            {/* Gráfico de evolución de pesos */}
+                            {(() => {
+                              const modelColors = {
+                                'ab_fast': '#10B981',
+                                'linear_8': '#6366F1', 
+                                'poly2_12': '#EC4899',
+                              };
+
+                              // Convertir weights a formato para CsvChart
+                              const weightsData = [];
+                              const allTimes = new Set();
+
+                              // Recopilar todos los timestamps únicos
+                              Object.entries(backendSeries.weights).forEach(([modelName, series]) => {
+                                series.forEach(point => {
+                                  allTimes.add(new Date(point.time).getTime());
+                                });
+                              });
+
+                              // Crear puntos con todos los modelos
+                              Array.from(allTimes).sort().forEach(timestamp => {
+                                const point = {
+                                  t: timestamp,
+                                  x: new Date(timestamp).toISOString()
+                                };
+                                
+                                Object.entries(backendSeries.weights).forEach(([modelName, series]) => {
+                                  const matchingPoint = series.find(p => 
+                                    new Date(p.time).getTime() === timestamp
+                                  );
+                                  if (matchingPoint) {
+                                    point[modelName] = matchingPoint.weight;
+                                  }
+                                });
+
+                                weightsData.push(point);
+                              });
+
+                              const weightsSeries = Object.keys(backendSeries.weights).map(modelName => ({
+                                key: modelName,
+                                label: modelName,
+                                color: modelColors[modelName] || '#999',
+                                yAxisId: 'weights'
+                              }));
+
+                              return weightsData.length > 0 ? (
+                                <div>
+                                  <CsvChart 
+                                    data={weightsData} 
+                                    series={weightsSeries}
+                                    height={300}
+                                    syncId="weights-sync"
+                                  />
+                                  <div style={{ marginTop: 12, padding: "12px", background: "#0a0a0a", borderRadius: "6px" }}>
+                                    <div style={{ fontSize: 12, color: "#999", marginBottom: 8 }}>
+                                      <strong style={{ color: "#00A3FF" }}>💡 Cómo funciona el sistema de pesos (AP3):</strong>
+                                    </div>
+                                    <ul style={{ fontSize: 11, color: "#888", margin: 0, paddingLeft: 20 }}>
+                                      <li>En cada timestamp, se ordenan los modelos por error (menor error = mejor)</li>
+                                      <li>Se restan 1 punto a todos los modelos (penalización base)</li>
+                                      <li>Se asignan puntos según ranking: M puntos al mejor, M-1 al segundo, ..., 1 al peor</li>
+                                      <li>Los pesos pueden ser negativos para crear contraste real</li>
+                                      <li>Los modelos con pesos más altos han demostrado mejor rendimiento histórico</li>
+                                    </ul>
+                                    <div style={{ marginTop: 12, fontSize: 11, color: "#666" }}>
+                                      <strong>Últimos pesos:</strong> {
+                                        Object.entries(backendSeries.weights).map(([model, series]) => {
+                                          const lastWeight = series[series.length - 1]?.weight || 0;
+                                          const color = modelColors[model] || '#999';
+                                          return (
+                                            <span key={model} style={{ 
+                                              marginLeft: 12,
+                                              color: color,
+                                              fontWeight: 600
+                                            }}>
+                                              {model}: {lastWeight.toFixed(1)}
+                                            </span>
+                                          );
+                                        })
+                                      }
+                                    </div>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div style={{ color: "#666", fontSize: 12 }}>
+                                  No hay datos de pesos disponibles
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Gráficos individuales - UN modelo por gráfico */}
+                      <div style={{ marginTop: 30 }}>
+                        <h4 style={{ color: "#00A3FF", fontSize: 14, marginBottom: 12 }}>
+                          📈 Vista Individual por Modelo
+                        </h4>
+                        {Object.keys(backendSeries.models || {}).map((modelName, idx) => {
+                          // Crear datos filtrados: solo Real + este modelo
+                          const filteredData = backendSeries.points.map(p => ({
+                            t: p.t,
+                            x: new Date(p.t).toISOString(),
+                            var: p.var,
+                            [modelName]: p[modelName]
+                          }));
+
+                          const modelColors = {
+                            'ab_fast': '#10B981',
+                            'linear_8': '#6366F1', 
+                            'poly2_12': '#EC4899',
+                            'kalman': '#F59E0B',
+                            'alphabeta': '#8B5CF6'
+                          };
+
+                          const color = modelColors[modelName] || '#999';
+
+                          return (
+                            <div key={modelName} style={{ 
+                              marginBottom: 24,
+                              padding: "12px",
+                              background: "#1a1a1a",
+                              borderRadius: "8px",
+                              border: `2px solid ${color}40`
+                            }}>
+                              <h5 style={{ 
+                                color: color, 
+                                fontSize: 13, 
+                                marginBottom: 8,
+                                fontWeight: 600
+                              }}>
+                                {modelName.toUpperCase()}
+                              </h5>
+                              <CsvChart data={filteredData} />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  ) : (
+                    <p style={{ fontSize: 12, color: "#f66", padding: "12px", background: "#2a1a1a", borderRadius: "6px" }}>
+                      ⚠️ No hay puntos disponibles. Asegúrate de haber ejecutado el pipeline primero y que el agente esté escribiendo datos a InfluxDB.
+                    </p>
+                  )}
+                </>
+              )}
+
               <pre className="scrollable" style={{ marginTop: 12 }}>
                 {chartData.slice(0, 10).map((row, i) => (
                   <div key={i}>{JSON.stringify(row, null, 2)}</div>
