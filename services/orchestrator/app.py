@@ -481,6 +481,14 @@ def metrics_models(id: str = Query(..., description="series id"), start: str = Q
     # Now compute per-model aligned metrics
     result_daily: Dict[str, List[Dict[str, Any]]] = {}
     result_overall: Dict[str, Dict[str, Any]] = {}
+    
+    # AP4: Query weights for each model
+    try:
+        weights_by_model = _query_weights(id, start)
+    except Exception as e:
+        logger.exception("Failed to query weights for AP4")
+        weights_by_model = {}
+    
     for model, series in yhat_by_model.items():
         series.sort(key=lambda x: x["time"])
         aligned = _align_by_time(var_series, series)
@@ -507,11 +515,17 @@ def metrics_models(id: str = Query(..., description="series id"), start: str = Q
             mp = sum(v[2] for v in vals) / len(vals)
             daily_list.append({"time": d, "mae": ma, "rmse": rs, "mape": mp})
 
+        # Get latest weight for this model
+        current_weight = None
+        if model in weights_by_model and weights_by_model[model]:
+            current_weight = weights_by_model[model][-1]["weight"]
+        
         result_daily[model] = daily_list
         result_overall[model] = {
             "mae": (sum(abs_list)/len(abs_list)) if abs_list else None,
             "rmse": (math.sqrt(sum(sq_list)/len(sq_list)) if sq_list else None),
             "mape": (sum(ape_list)/len(ape_list)) if ape_list else None,
+            "weight": current_weight,
             "n": len(abs_list)
         }
 

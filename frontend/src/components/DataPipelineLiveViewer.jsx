@@ -148,41 +148,40 @@ async function loadBackendSeries() {
   setBackendSeries(data);
 }
 
+  // handleLoadMetrics: Carga métricas del backend
+  const handleLoadMetrics = async () => {
+    if (!selectedId) return;
+    setMetricsLoading(true);
+    setMetricsError(null);
 
-async function handleLoadMetrics() {
-  if (!selectedId) return;
-  setMetricsLoading(true);
-  setMetricsError(null);
+    try {
+      const qs = encodeURIComponent(selectedId);
+      const [resCombined, resModels] = await Promise.all([
+        fetch(`${API_BASE}/api/metrics/combined?id=${qs}&start=-3d`),
+        fetch(`${API_BASE}/api/metrics/models?id=${qs}&start=-3d`)
+      ]);
 
-  try {
-    const qs = encodeURIComponent(selectedId);
-    const [resCombined, resModels] = await Promise.all([
-      fetch(`${API_BASE}/api/metrics/combined?id=${qs}&start=-3d`),
-      fetch(`${API_BASE}/api/metrics/models?id=${qs}&start=-3d`)
-    ]);
+      if (!resCombined.ok) {
+        throw new Error(`combined ${resCombined.status}`);
+      }
+      if (!resModels.ok) {
+        throw new Error(`models ${resModels.status}`);
+      }
 
-    if (!resCombined.ok) {
-      throw new Error(`combined ${resCombined.status}`);
+      const dataCombined = await resCombined.json();
+      const dataModels = await resModels.json();
+
+      setMetricsCombined(dataCombined);
+      setMetricsModels(dataModels);
+    } catch (err) {
+      console.error("Error loading metrics", err);
+      setMetricsError(err.message || "Error loading metrics");
+      setMetricsCombined(null);
+      setMetricsModels(null);
+    } finally {
+      setMetricsLoading(false);
     }
-    if (!resModels.ok) {
-      throw new Error(`models ${resModels.status}`);
-    }
-
-    const dataCombined = await resCombined.json();
-    const dataModels = await resModels.json();
-
-    setMetricsCombined(dataCombined);
-    setMetricsModels(dataModels);
-  } catch (err) {
-    console.error("Error loading metrics", err);
-    setMetricsError(err.message || "Error loading metrics");
-    setMetricsCombined(null);
-    setMetricsModels(null);
-  } finally {
-    setMetricsLoading(false);
-  }
-}
-
+  };
 
   // helper interno: intento automático de detectar columnas de tiempo y valor
   const autoDetectColumns = (rows) => {
