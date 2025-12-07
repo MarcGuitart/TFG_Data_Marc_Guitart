@@ -88,8 +88,53 @@ BUFFER_LEN     = int(os.getenv("BUFFER_LEN", "32"))  # tamaño ventana por id
 
 # === HTTP app (health) ===
 app = FastAPI()
+
 @app.get("/health")
 def health(): return {"status": "ok"}
+
+@app.get("/api/weights/{unit_id}")
+def get_weights(unit_id: str):
+    """AP3: Devuelve los pesos actuales de un HyperModel por unit_id"""
+    hm = hyper_by_id.get(unit_id)
+    if not hm:
+        return {"error": f"No HyperModel for {unit_id}", "weights": {}}
+    return {"unit_id": unit_id, "weights": hm.export_state()}
+
+@app.get("/api/history/{unit_id}")
+def get_history(unit_id: str, last_n: int = 100):
+    """AP3: Devuelve el historial de pesos para análisis"""
+    hm = hyper_by_id.get(unit_id)
+    if not hm:
+        return {"error": f"No HyperModel for {unit_id}", "history": []}
+    history = hm.get_history()
+    return {
+        "unit_id": unit_id,
+        "total_steps": len(history),
+        "history": history[-last_n:] if last_n else history
+    }
+
+@app.get("/api/stats/{unit_id}")
+def get_model_stats(unit_id: str):
+    """AP3: Estadísticas por modelo para la memoria del TFG"""
+    hm = hyper_by_id.get(unit_id)
+    if not hm:
+        return {"error": f"No HyperModel for {unit_id}"}
+    return {
+        "unit_id": unit_id,
+        "stats": hm.get_model_stats(),
+        "choices_diff": hm.get_choices_diff_count()
+    }
+
+@app.post("/api/export_csv/{unit_id}")
+def export_csv(unit_id: str):
+    """AP3: Exporta historial a CSV para análisis en Excel"""
+    hm = hyper_by_id.get(unit_id)
+    if not hm:
+        return {"error": f"No HyperModel for {unit_id}"}
+    
+    filepath = f"/app/data/weights_history_{unit_id}.csv"
+    result = hm.export_history_csv(filepath)
+    return {"unit_id": unit_id, "filepath": result}
 
 # === CLIENTES Influx ===
 client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
@@ -159,6 +204,22 @@ def auto_purge():
         except Exception as e:
             log.error("error en auto-purge: %s", e)
         time.sleep(300)
+
+# AP3: Exportación automática de historiales a CSV
+CSV_EXPORT_PERIOD = int(os.getenv("CSV_EXPORT_PERIOD_SEC", "300"))  # cada 5 min
+
+def auto_export_csv():
+    """AP3: Exporta periódicamente los historiales a CSV para análisis offline"""
+    while True:
+        time.sleep(CSV_EXPORT_PERIOD)
+        try:
+            for unit_id, hm in list(hyper_by_id.items()):
+                if hm._history:  # Solo si hay datos
+                    filepath = f"/app/data/weights_history_{unit_id}.csv"
+                    result = hm.export_history_csv(filepath)
+                    log.info("[AP3] CSV exportado: %s (%d steps)", result, len(hm._history))
+        except Exception as e:
+            log.error("[AP3] Error exportando CSV: %s", e)
 
 # === ESCRITURA TELEMETRÍA ===
 def write_timeseries(rec):
@@ -262,6 +323,7 @@ def main():
 
     threading.Thread(target=auto_purge, daemon=True).start()
     threading.Thread(target=learner_loop, daemon=True).start()
+    threading.Thread(target=auto_export_csv, daemon=True).start()  # AP3: exportación CSV
 
     log.info("escuchando %s y publicando en %s", TIN, TOUT)
 
@@ -289,10 +351,12 @@ def main():
 
             # --- actualizar pesos con la VERDAD del tick anterior (si existía pred previa)
             best_model = None
+            ts_str = rec.get("timestamp") or base_ts.isoformat()
             if unit in last_pred_by_id and y_real is not None:
                 hm = get_hyper_for(unit)
                 try:
-                    best_model = hm.update_weights(float(y_real))
+                    # AP3: Pasamos timestamp para el historial
+                    best_model = hm.update_weights(float(y_real), ts=ts_str)
                 except Exception as e:
                     log.warning("[hypermodel] update_weights error: %s", e)
 
@@ -308,7 +372,9 @@ def main():
             y_hat, preds_by_model = hm.predict(list(buf))
             weights = hm.export_state()
             chosen_model = hm.get_chosen_model()  # Modelo elegido (modo adaptive)
-            last_errors = hm.get_last_errors()     # Errores del último step
+            last_errors = hm.get_last_errors()     # Errores absolutos del último step
+            last_errors_rel = hm.get_last_errors_rel()  # AP2: Errores relativos
+            chosen_error = hm.get_chosen_error()   # AP2: Error del modelo elegido
             last_pred_by_id[unit] = y_hat
 
             log.info("[pred-ts] base=%s ts_pred=%s delta_min=%.1f",
@@ -331,7 +397,23 @@ def main():
             enriched["hyper_models"] = preds_by_model
             enriched["hyper_weights"] = weights
             enriched["hyper_chosen"] = chosen_model       # Modelo elegido (AP2)
-            enriched["hyper_errors"] = last_errors        # Errores por modelo (AP2)
+            enriched["hyper_errors"] = last_errors        # Errores absolutos por modelo
+            enriched["hyper_errors_rel"] = last_errors_rel  # AP2: Errores relativos por modelo
+            
+            # AP2: Error específico del modelo elegido
+            enriched["chosen_error_abs"] = chosen_error.get("abs", 0.0)
+            enriched["chosen_error_rel"] = chosen_error.get("rel", 0.0)
+            
+            # AP3: Información adicional del sistema de pesos con memoria
+            last_entry = hm.get_last_history_entry()
+            if last_entry:
+                enriched["chosen_by_error"] = last_entry.get("chosen_by_error", "")
+                enriched["chosen_by_weight"] = last_entry.get("chosen_by_weight", "")
+                enriched["choices_differ"] = last_entry.get("choices_differ", False)
+                enriched["decay_share"] = last_entry.get("decay_share", 0.0)
+                # Rankings de este step
+                enriched["rankings"] = {name: last_entry.get(f"rank_{name}", 0) for name in hm.model_names}
+                enriched["rewards"] = {name: last_entry.get(f"reward_{name}", 0) for name in hm.model_names}
 
             producer.send(TOUT, enriched)
             producer.flush()
