@@ -69,6 +69,35 @@
   background-color: #fef3c7;
 }
 
+/* AP4: Estilos para Top-3 destacados */
+.metrics-row--gold {
+  background-color: #fef3c7;  /* gold/yellow background */
+}
+
+.metrics-row--silver {
+  background-color: #f3f4f6;  /* light gray */
+}
+
+.metrics-row--bronze {
+  background-color: #fed7aa;  /* light orange */
+}
+
+.metrics-row--gold td,
+.metrics-row--silver td,
+.metrics-row--bronze td {
+  font-weight: 600;
+}
+
+/* Resumen del Top-3 */
+.metrics-top3-summary {
+  margin-top: 12px;
+  padding: 8px 12px;
+  background-color: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
 .metrics-rank {
   text-align: center;
   font-size: 1rem;

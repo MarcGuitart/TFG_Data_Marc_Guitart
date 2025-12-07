@@ -164,7 +164,7 @@ def _query_weights(id_: str, start: str = "-7d"):
     AP3: Consulta la evolución de pesos por modelo desde InfluxDB.
     Measurement: weights
     Tags: id, model
-    Field: weight (float)
+    Field: w (float) - nota: el collector escribe "w", no "weight"
     
     Returns:
       {
@@ -174,7 +174,7 @@ def _query_weights(id_: str, start: str = "-7d"):
     """
     flux_weights = f'''from(bucket:"{INFLUX_BUCKET}")
   |> range(start:{start})
-  |> filter(fn:(r)=> r._measurement=="weights" and r.id=="{id_}" and r._field=="weight")
+  |> filter(fn:(r)=> r._measurement=="weights" and r.id=="{id_}" and r._field=="w")
   |> keep(columns:["_time","_value","model"])'''
     logger.debug("Flux weights:\n%s", flux_weights)
     try:
@@ -207,6 +207,44 @@ def _query_weights(id_: str, start: str = "-7d"):
     return weights_by_model
 
 
+def _query_chosen_errors(id_: str, start: str) -> List[Dict[str, Any]]:
+    """
+    AP2: Consulta los errores del modelo elegido desde InfluxDB.
+    Measurement: chosen_error
+    Tags: id
+    Fields: error_abs, error_rel
+    
+    Returns:
+      [ {time: datetime, error_abs: float, error_rel: float}, ... ]
+    """
+    flux_errors = f'''from(bucket:"{INFLUX_BUCKET}")
+  |> range(start:{start})
+  |> filter(fn:(r)=> r._measurement=="chosen_error" and r.id=="{id_}")
+  |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
+  |> keep(columns:["_time","error_abs","error_rel"])'''
+    logger.debug("Flux chosen_errors:\n%s", flux_errors)
+    try:
+        tabs = _metrics_q.query(org=INFLUX_ORG, query=flux_errors)
+    except Exception as e:
+        logger.exception("Influx query failed for chosen_error")
+        return []
+
+    errors = []
+    for t in tabs:
+        for r in t.records:
+            try:
+                errors.append({
+                    "time": r.get_time(),
+                    "error_abs": float(r.values.get("error_abs", 0)) if r.values.get("error_abs") is not None else None,
+                    "error_rel": float(r.values.get("error_rel", 0)) if r.values.get("error_rel") is not None else None,
+                })
+            except Exception:
+                continue
+
+    errors.sort(key=lambda x: x["time"])
+    return errors
+
+
 @app.get("/api/series")
 def get_series(
     id: str = Query(..., description="series id"),
@@ -214,7 +252,7 @@ def get_series(
 ):
     """
     Devuelve la serie observada (var), la predicha híbrida (prediction),
-    las predicciones por modelo, y el modelo elegido en cada instante (AP2).
+    las predicciones por modelo, el modelo elegido y errores en cada instante (AP2).
     """
     start = f"-{hours}h"
 
@@ -224,10 +262,36 @@ def get_series(
         yhat_by_model = _query_models_yhat(id, start)
         chosen_series = _query_chosen_model(id, start)  # AP2: modelo elegido
         weights_by_model = _query_weights(id, start)    # AP3: pesos por modelo
-        logger.info(f"[/api/series] id={id} var_series={len(var_series)} pred_series={len(pred_series)} yhat_by_model keys={list(yhat_by_model.keys())} chosen={len(chosen_series)} weights={list(weights_by_model.keys())}")
+        chosen_errors = _query_chosen_errors(id, start) # AP2: errores del modelo elegido
+        logger.info(f"[/api/series] id={id} var_series={len(var_series)} pred_series={len(pred_series)} yhat_by_model keys={list(yhat_by_model.keys())} chosen={len(chosen_series)} errors={len(chosen_errors)} weights={list(weights_by_model.keys())}")
     except Exception as e:
         logger.exception("Failed to query series for /api/series")
-        raise HTTPException(status_code=502, detail=f"influx query failed: {e}")
+        # Retorna datos vacíos en lugar de error, para que el frontend pueda manejarlo
+        return JSONResponse(content={
+            "id": id,
+            "observed": [],
+            "predicted": [],
+            "models": {},
+            "chosen_models": [],
+            "selector_table": [],
+            "weights": {},
+            "points": [],
+            "error": str(e)
+        })
+
+    # Handle empty data gracefully
+    if not var_series and not pred_series and not yhat_by_model:
+        return JSONResponse(content={
+            "id": id,
+            "observed": [],
+            "predicted": [],
+            "models": {},
+            "chosen_models": [],
+            "selector_table": [],
+            "weights": {},
+            "points": [],
+            "error": "No data found for this ID"
+        })
 
     # 1) Alineamos var y prediction híbrida como antes
     aligned_main = _align_by_time(var_series, pred_series, tol_seconds=120)
@@ -274,9 +338,18 @@ def get_series(
     models_payload: Dict[str, List[Dict[str, Any]]] = {m: [] for m in yhat_by_model.keys()}
     points = []
     chosen_models = []  # AP2: lista de modelos elegidos por timestamp
+    selector_table = []  # AP2: tabla del selector adaptativo
 
     # Crear índice de modelo elegido por tiempo
     chosen_by_time = {c["time"]: c["model"] for c in chosen_series}
+    
+    # AP2: Crear índice de errores por tiempo
+    errors_by_time = {}
+    for e in chosen_errors:
+        errors_by_time[e["time"]] = {
+            "error_abs": e.get("error_abs"),
+            "error_rel": e.get("error_rel")
+        }
 
     for t in times_sorted:
         b = bucket[t]
@@ -284,6 +357,7 @@ def get_series(
         a_val = b.get("a")
         c_val = b.get("combined")
         chosen = chosen_by_time.get(t)  # Modelo elegido en este timestamp
+        err_info = errors_by_time.get(t, {})  # AP2: errores de este timestamp
 
         # lista clásica como ya tenías
         if a_val is not None:
@@ -298,9 +372,19 @@ def get_series(
                 "y_hat": yhat
             })
 
-        # AP2: modelo elegido
+        # AP2: modelo elegido con error
         if chosen:
             chosen_models.append({"t": ts_iso, "model": chosen})
+            # Tabla del selector adaptativo
+            selector_table.append({
+                "t": ts_iso,
+                "t_ms": int(t.timestamp() * 1000),
+                "chosen_model": chosen,
+                "error_abs": err_info.get("error_abs"),
+                "error_rel": err_info.get("error_rel"),
+                "y_real": a_val,
+                "y_pred": c_val,
+            })
 
         # punto plano para CsvChart
         point = {
@@ -308,6 +392,8 @@ def get_series(
             "var": a_val,
             "prediction": c_val,
             "chosen_model": chosen,  # AP2: agregar modelo elegido
+            "error_abs": err_info.get("error_abs"),  # AP2: error absoluto
+            "error_rel": err_info.get("error_rel"),  # AP2: error relativo (%)
         }
         for model, yhat in b["models"].items():
             point[model] = yhat
@@ -319,6 +405,7 @@ def get_series(
         "predicted": predicted,       # híbrida
         "models": models_payload,     # por modelo
         "chosen_models": chosen_models,  # AP2: modelo elegido por timestamp
+        "selector_table": selector_table,  # AP2: tabla completa del selector
         "weights": weights_by_model,  # AP3: pesos por modelo
         "points": points,             # listo para CsvChart
     }
@@ -532,6 +619,32 @@ def metrics_models(id: str = Query(..., description="series id"), start: str = Q
     sanitized = _sanitize_numbers({"id": id, "daily": result_daily, "overall": result_overall})
     return JSONResponse(content=sanitized)
 
+# Endpoint para obtener los IDs disponibles en InfluxDB
+@app.get("/api/ids")
+def get_available_ids():
+    """Devuelve lista de IDs únicos disponibles en InfluxDB"""
+    try:
+        flux = f'''from(bucket:"{INFLUX_BUCKET}")
+  |> range(start:-7d)
+  |> filter(fn:(r)=> r._measurement=="telemetry")
+  |> group(columns:["id"])
+  |> distinct(column:"id")
+  |> keep(columns:["id"])'''
+        
+        tables = _metrics_q.query(org=INFLUX_ORG, query=flux)
+        ids = []
+        seen = set()
+        for table in tables:
+            for record in table.records:
+                id_val = record.values.get("id")
+                if id_val and id_val not in seen:
+                    ids.append(str(id_val))
+                    seen.add(id_val)
+        return {"ids": sorted(ids)}
+    except Exception as e:
+        logger.error(f"Error querying IDs: {e}", exc_info=True)
+        return {"ids": []}
+
 # Asegura registrar el router en tu app FastAPI existente
 try:
     app.include_router(router_metrics)
@@ -545,6 +658,61 @@ from fastapi import HTTPException
 
 LOADER_URL      = os.getenv("LOADER_URL", "http://window_loader:8083/trigger")
 COLLECTOR_RESET = os.getenv("COLLECTOR_URL", "http://window_collector:8082/reset")
+AGENT_URL       = os.getenv("AGENT_URL", "http://agent:8090")  # AP3: URL del agent
+
+# ============================================================================
+# AP3: Proxy endpoints para acceder a los datos del agent
+# ============================================================================
+
+@app.get("/api/agent/weights/{unit_id}")
+def proxy_agent_weights(unit_id: str):
+    """AP3: Obtener pesos actuales de un HyperModel via agent"""
+    try:
+        r = httpx.get(f"{AGENT_URL}/api/weights/{unit_id}", timeout=10.0)
+        r.raise_for_status()
+        return r.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Agent unavailable: {e}")
+
+@app.get("/api/agent/history/{unit_id}")
+def proxy_agent_history(unit_id: str, last_n: int = 100):
+    """AP3: Obtener historial de pesos para análisis"""
+    try:
+        r = httpx.get(f"{AGENT_URL}/api/history/{unit_id}", params={"last_n": last_n}, timeout=10.0)
+        r.raise_for_status()
+        return r.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Agent unavailable: {e}")
+
+@app.get("/api/agent/stats/{unit_id}")
+def proxy_agent_stats(unit_id: str):
+    """AP3: Estadísticas por modelo para la memoria del TFG"""
+    try:
+        r = httpx.get(f"{AGENT_URL}/api/stats/{unit_id}", timeout=10.0)
+        r.raise_for_status()
+        return r.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Agent unavailable: {e}")
+
+@app.post("/api/agent/export_csv/{unit_id}")
+def proxy_agent_export_csv(unit_id: str):
+    """AP3: Exportar historial a CSV"""
+    try:
+        r = httpx.post(f"{AGENT_URL}/api/export_csv/{unit_id}", timeout=30.0)
+        r.raise_for_status()
+        return r.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Agent unavailable: {e}")
+
+# ============================================================================
 
 @app.post("/api/run_window")
 def run_window():
