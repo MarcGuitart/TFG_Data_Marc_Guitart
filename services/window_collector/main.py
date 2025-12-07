@@ -163,6 +163,97 @@ def write_to_influx(rec):
         except Exception as e:
             print(f"[collector] ❌ Error guardando chosen_model: {e}")
 
+    # AP2: Error del modelo elegido (absoluto y relativo)
+    chosen_error_abs = rec.get("chosen_error_abs")
+    chosen_error_rel = rec.get("chosen_error_rel")
+    if chosen_error_abs is not None or chosen_error_rel is not None:
+        try:
+            tse = _parse_ts(rec.get("ts_pred")) or _shift_ts_to_today(rec.get("timestamp"))
+            p = Point("chosen_error").tag("id", unit)
+            if chosen_error_abs is not None:
+                p = p.field("error_abs", float(chosen_error_abs))
+            if chosen_error_rel is not None:
+                p = p.field("error_rel", float(chosen_error_rel))
+            p = p.time(tse, WritePrecision.S)
+            _write_api.write(bucket=INFLUX_BUCKET, record=p)
+        except Exception as e:
+            print(f"[collector] ❌ Error guardando chosen_error: {e}")
+
+    # AP2: Errores por modelo (relativos) para análisis detallado
+    errors_rel = rec.get("hyper_errors_rel")
+    if isinstance(errors_rel, dict):
+        try:
+            tser = _parse_ts(rec.get("ts_pred")) or _shift_ts_to_today(rec.get("timestamp"))
+            for model_name, err_rel in errors_rel.items():
+                _write_api.write(
+                    bucket=INFLUX_BUCKET,
+                    record=(
+                        Point("model_errors")
+                        .tag("id", unit)
+                        .tag("model", str(model_name))
+                        .field("error_rel", float(err_rel))
+                        .time(tser, WritePrecision.S)
+                    ),
+                )
+        except Exception as e:
+            print(f"[collector] ❌ Error guardando model_errors: {e}")
+
+    # AP3: Rankings y rewards por modelo
+    rankings = rec.get("rankings")
+    rewards = rec.get("rewards")
+    if isinstance(rankings, dict) or isinstance(rewards, dict):
+        try:
+            ts_ap3 = _parse_ts(rec.get("ts_pred")) or _shift_ts_to_today(rec.get("timestamp"))
+            
+            # Escribir rankings
+            if isinstance(rankings, dict):
+                for model_name, rank in rankings.items():
+                    _write_api.write(
+                        bucket=INFLUX_BUCKET,
+                        record=(
+                            Point("model_rankings")
+                            .tag("id", unit)
+                            .tag("model", str(model_name))
+                            .field("rank", int(rank))
+                            .time(ts_ap3, WritePrecision.S)
+                        ),
+                    )
+            
+            # Escribir rewards
+            if isinstance(rewards, dict):
+                for model_name, reward in rewards.items():
+                    _write_api.write(
+                        bucket=INFLUX_BUCKET,
+                        record=(
+                            Point("model_rewards")
+                            .tag("id", unit)
+                            .tag("model", str(model_name))
+                            .field("reward", int(reward))
+                            .time(ts_ap3, WritePrecision.S)
+                        ),
+                    )
+        except Exception as e:
+            print(f"[collector] ❌ Error guardando rankings/rewards: {e}")
+
+    # AP3: chosen_by_error vs chosen_by_weight (para comparación)
+    chosen_by_error = rec.get("chosen_by_error")
+    chosen_by_weight = rec.get("chosen_by_weight")
+    choices_differ = rec.get("choices_differ")
+    if chosen_by_error or chosen_by_weight:
+        try:
+            ts_choice = _parse_ts(rec.get("ts_pred")) or _shift_ts_to_today(rec.get("timestamp"))
+            p = Point("weight_decisions").tag("id", unit)
+            if chosen_by_error:
+                p = p.field("chosen_by_error", str(chosen_by_error))
+            if chosen_by_weight:
+                p = p.field("chosen_by_weight", str(chosen_by_weight))
+            if choices_differ is not None:
+                p = p.field("choices_differ", 1 if choices_differ else 0)
+            p = p.time(ts_choice, WritePrecision.S)
+            _write_api.write(bucket=INFLUX_BUCKET, record=p)
+        except Exception as e:
+            print(f"[collector] ❌ Error guardando weight_decisions: {e}")
+
 
 
 def run_consumer():
