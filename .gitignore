@@ -1,1 +1,58 @@
 node_modules
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.env
+.env
+*.sqlite3
+*.db
+*.log
+
+# VSCode
+.vscode/
+.history/
+
+# FastAPI/Uvicorn
+*.pid
+
+# Kafka
+*.kafka-logs
+
+# InfluxDB
+*.influxdb-data
+
+# Data & results
+/data/
+*.csv
+*.xlsx
+*.json
+*.parquet
+
+# Modelos y checkpoints
+*.h5
+*.ckpt
+*.pt
+*.pth
+*.joblib
+*.sav
+
+# Node/Vite/React
+node_modules/
+dist/
+build/
+*.lock
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker
+*.pid
+*.sock
+
+# Otros
+*.bak
+*.swp
+*.tmp

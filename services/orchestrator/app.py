@@ -42,12 +42,17 @@ logger = logging.getLogger("metrics_debug")
 
 def _sanitize_numbers(o):
     """Recorre recursivamente dicts/listas y convierte NaN/Inf a None; convierte Decimals/numpy numbers a nativos."""
+    import datetime
+    
     # dict
     if isinstance(o, dict):
         return {k: _sanitize_numbers(v) for k, v in o.items()}
     # list/tuple
     if isinstance(o, (list, tuple)):
         return [_sanitize_numbers(v) for v in o]
+    # datetime -> ISO string
+    if isinstance(o, (datetime.datetime, datetime.date)):
+        return o.isoformat()
     # Decimal
     if isinstance(o, Decimal):
         try:
@@ -194,7 +199,7 @@ def _query_weights(id_: str, start: str = "-7d"):
                 if model_name not in weights_by_model:
                     weights_by_model[model_name] = []
                 weights_by_model[model_name].append({
-                    "time": r.get_time(),
+                    "time": r.get_time().isoformat(),  # ✅ Convertir datetime a ISO string
                     "weight": float(weight_val),
                 })
             except Exception:
@@ -243,6 +248,72 @@ def _query_chosen_errors(id_: str, start: str) -> List[Dict[str, Any]]:
 
     errors.sort(key=lambda x: x["time"])
     return errors
+
+
+@app.get("/api/selector")
+def get_selector_table(
+    id: str = Query(..., description="series id"),
+    hours: int = Query(24, ge=1, le=24*365)
+):
+    """
+    AP2: Devuelve la tabla del selector adaptativo con:
+    - Timestamp
+    - Modelo elegido
+    - Error relativo puntual (%)
+    - Error absoluto puntual
+    - Valor real y predicho
+    """
+    start = f"-{hours}h"
+    
+    try:
+        var_series = _query_field("telemetry", id, "var", start)
+        pred_series = _query_field("telemetry", id, "prediction", start)
+        chosen_series = _query_chosen_model(id, start)
+        chosen_errors = _query_chosen_errors(id, start)
+    except Exception as e:
+        logger.exception("Failed to query selector data")
+        return JSONResponse(content={"id": id, "selector_table": [], "error": str(e)})
+    
+    if not chosen_series:
+        return JSONResponse(content={"id": id, "selector_table": []})
+    
+    # Alinear var y prediction
+    aligned_main = _align_by_time(var_series, pred_series, tol_seconds=120)
+    
+    # Crear índices
+    chosen_by_time = {c["time"]: c["model"] for c in chosen_series}
+    errors_by_time = {}
+    for e in chosen_errors:
+        errors_by_time[e["time"]] = {
+            "error_abs": e.get("error_abs"),
+            "error_rel": e.get("error_rel")
+        }
+    
+    # Construir tabla
+    selector_table = []
+    for p in aligned_main:
+        t = p["time"]
+        chosen = chosen_by_time.get(t)
+        if not chosen:
+            continue
+        
+        err_info = errors_by_time.get(t, {})
+        
+        selector_table.append({
+            "t": t.isoformat(),
+            "t_ms": int(t.timestamp() * 1000),
+            "chosen_model": chosen,
+            "error_rel": err_info.get("error_rel"),
+            "error_abs": err_info.get("error_abs"),
+            "y_real": p["a"],
+            "y_pred": p["b"],
+        })
+    
+    return JSONResponse(content=_sanitize_numbers({
+        "id": id,
+        "selector_table": selector_table,
+        "total_rows": len(selector_table)
+    }))
 
 
 @app.get("/api/series")
@@ -386,14 +457,22 @@ def get_series(
                 "y_pred": c_val,
             })
 
-        # punto plano para CsvChart
+        # punto plano para CsvChart y LivePredictionChart
         point = {
             "t": int(t.timestamp() * 1000),  # epoch ms
-            "var": a_val,
-            "prediction": c_val,
-            "chosen_model": chosen,  # AP2: agregar modelo elegido
-            "error_abs": err_info.get("error_abs"),  # AP2: error absoluto
-            "error_rel": err_info.get("error_rel"),  # AP2: error relativo (%)
+            "timestamp": t.isoformat(),      # ISO timestamp para LivePredictionChart
+            "var": a_val,                    # valor observado
+            "yhat": c_val,                   # predicción híbrida (para compatibilidad)
+            "prediction": c_val,             # predicción híbrida
+            "chosen_model": chosen,          # AP2: modelo elegido
+            "chosen_error_abs": err_info.get("error_abs"),  # AP2: error absoluto
+            "chosen_error_rel": err_info.get("error_rel"),  # AP2: error relativo
+            "hyper_models": {                # Modelos individuales
+                "kalman": b["models"].get("kalman"),
+                "linear": b["models"].get("linear"),
+                "poly": b["models"].get("poly"),
+                "alphabeta": b["models"].get("alphabeta"),
+            }
         }
         for model, yhat in b["models"].items():
             point[model] = yhat
@@ -408,6 +487,8 @@ def get_series(
         "selector_table": selector_table,  # AP2: tabla completa del selector
         "weights": weights_by_model,  # AP3: pesos por modelo
         "points": points,             # listo para CsvChart
+        "data": points,               # TAMBIÉN como "data" para LivePredictionChart.jsx
+        "total": len(points),         # Para que el componente pueda calcular progreso
     }
     return JSONResponse(content=_sanitize_numbers(payload))
 
@@ -619,6 +700,114 @@ def metrics_models(id: str = Query(..., description="series id"), start: str = Q
     sanitized = _sanitize_numbers({"id": id, "daily": result_daily, "overall": result_overall})
     return JSONResponse(content=sanitized)
 
+
+@app.get("/api/metrics/models/ranked")
+def metrics_models_ranked(id: str = Query(..., description="series id"), start: str = Query("-7d")):
+    """
+    AP4: Devuelve métricas por modelo ORDENADAS POR PESO (para Top-3).
+    Combina información de errores con pesos para mostrar ranking claro.
+    """
+    try:
+        var_series = _query_field("telemetry", id, "var", start)
+        weights_by_model = _query_weights(id, start)
+    except Exception as e:
+        logger.exception("Failed to query for metrics_models_ranked")
+        raise HTTPException(status_code=502, detail=f"influx query failed: {e}")
+
+    # Query all yhat points for this id
+    flux_yhat = f'''from(bucket:"{INFLUX_BUCKET}")
+  |> range(start:{start})
+  |> filter(fn:(r)=> r._measurement=="telemetry_models" and r.id=="{id}" and r._field=="yhat")
+  |> keep(columns:["_time","_value","model"])'''
+    
+    try:
+        tabs = _metrics_q.query(org=INFLUX_ORG, query=flux_yhat)
+    except Exception as e:
+        logger.exception("Influx query failed for yhat all models in ranked metrics")
+        raise HTTPException(status_code=502, detail=f"influx query failed: {e}")
+
+    # Organize yhat by model
+    yhat_by_model: Dict[str, List[Dict[str, Any]]] = {}
+    for t in tabs:
+        for r in t.records:
+            model = r.values.get("model")
+            v = r.values.get("_value")
+            if model is None or v is None:
+                continue
+            try:
+                yhat_by_model.setdefault(model, []).append({"time": r.get_time(), "value": float(v)})
+            except Exception:
+                continue
+
+    # Calcular métricas por modelo
+    result_overall: Dict[str, Dict[str, Any]] = {}
+    
+    for model, series in yhat_by_model.items():
+        series.sort(key=lambda x: x["time"])
+        aligned = _align_by_time(var_series, series)
+        abs_list = []
+        sq_list = []
+        ape_list = []
+        rel_list = []
+        
+        for p in aligned:
+            err = p["b"] - p["a"]
+            abs_v = abs(err)
+            sq_v = err * err
+            
+            # Error relativo (%)
+            if p["a"] != 0:
+                rel_v = (err / p["a"]) * 100.0
+            else:
+                rel_v = 0.0 if abs(err) < 1e-9 else float('inf')
+            
+            ape_v = (abs(err / p["a"]) if p["a"] != 0 else 0.0)
+            
+            abs_list.append(abs_v)
+            sq_list.append(sq_v)
+            ape_list.append(ape_v)
+            rel_list.append(rel_v)
+        
+        # Get latest weight for this model
+        current_weight = None
+        weight_mean = None
+        if model in weights_by_model and weights_by_model[model]:
+            current_weight = weights_by_model[model][-1]["weight"]
+            weight_mean = sum(w["weight"] for w in weights_by_model[model]) / len(weights_by_model[model])
+        
+        mae = sum(abs_list) / len(abs_list) if abs_list else None
+        rmse = math.sqrt(sum(sq_list) / len(sq_list)) if sq_list else None
+        mape = sum(ape_list) / len(ape_list) if ape_list else None
+        error_rel_mean = sum(rel_list) / len(rel_list) if rel_list else None
+        
+        result_overall[model] = {
+            "model": model,
+            "mae": mae,
+            "rmse": rmse,
+            "mape": mape,
+            "error_rel_mean": error_rel_mean,
+            "weight_final": current_weight,
+            "weight_mean": weight_mean,
+            "n": len(abs_list)
+        }
+
+    # Ordenar por weight_final descendente para ranking
+    ranked = sorted(
+        result_overall.items(),
+        key=lambda kv: kv[1].get("weight_final") or -float('inf'),
+        reverse=True
+    )
+    
+    # Agregar rank
+    ranked_list = []
+    for rank, (model_name, metrics) in enumerate(ranked, 1):
+        metrics["rank"] = rank
+        metrics["badge"] = ["🥇", "🥈", "🥉"][rank - 1] if rank <= 3 else ""
+        ranked_list.append(metrics)
+    
+    sanitized = _sanitize_numbers({"id": id, "models": ranked_list})
+    return JSONResponse(content=sanitized)
+
 # Endpoint para obtener los IDs disponibles en InfluxDB
 @app.get("/api/ids")
 def get_available_ids():
@@ -715,33 +904,48 @@ def proxy_agent_export_csv(unit_id: str):
 # ============================================================================
 
 @app.post("/api/run_window")
-def run_window():
+def run_window(source: str = Query("uploaded.csv"), speed_ms: int = Query(0)):
     """
-    Demo mínima:
-      1) reset collector
-      2) dispara loader con un CSV fijo en /app/data
+    Dispara el window_loader con un CSV específico.
+    
+    Parámetros (query):
+      - source: nombre del archivo CSV en /app/data (default: uploaded.csv)
+      - speed_ms: delay en ms entre mensajes (default: 0 = sin delay)
+    
+    Uso: POST /api/run_window?source=archivo.csv&speed_ms=100
     """
-    # 1) reset collector
+    import time
+    
+    # 1) Reset collector
     try:
         r_reset = httpx.post(COLLECTOR_RESET, timeout=30.0)
         r_reset.raise_for_status()
     except Exception as e:
+        print(f"[orchestrator] collector reset failed: {e}")
         raise HTTPException(status_code=500, detail=f"collector reset failed: {e}")
 
-    # 2) dispara loader con CSV de pruebas
-    # Ajusta el nombre al que tengas en ../data dentro del repo
+    # Pequeño delay para que el reset se propague
+    time.sleep(1)
+
+    # 2) Dispara loader con el CSV especificado
     payload = {
-        "source": "uploaded.csv",  
-        "speed_ms": 0
+        "source": source,
+        "speed_ms": speed_ms
     }
+    
     try:
+        print(f"[orchestrator] Triggering loader with source={source}, speed_ms={speed_ms}")
         r_trig = httpx.post(LOADER_URL, json=payload, timeout=120.0)
         r_trig.raise_for_status()
-        data = r_trig.json()
+        data = r_trig.json() if r_trig.text else {}
+        print(f"[orchestrator] Loader response: {data}")
+        return {"status": "success", "loader_response": data, "source": source}
+    except httpx.HTTPStatusError as e:
+        print(f"[orchestrator] Loader HTTP error {e.response.status_code}: {e.response.text}")
+        raise HTTPException(status_code=500, detail=f"loader trigger failed: {e.response.text}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"loader trigger failed: {e}")
-
-    return {"loader_response": data}
+        print(f"[orchestrator] Loader error: {e}")
+        raise HTTPException(status_code=500, detail=f"loader trigger failed: {str(e)}")
 
 
 # Uploads
