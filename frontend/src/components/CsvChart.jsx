@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import {
   ResponsiveContainer, ComposedChart, XAxis, YAxis, Tooltip, Legend, Line, CartesianGrid,
 } from "recharts";
@@ -19,7 +19,7 @@ const MODEL_NAMES = {
   alphabeta: "Model AlphaBeta",
   kalman: "Model Kalman",
   var: "Real Traffic",
-  prediction: "Adaptive (selected)",
+  prediction: "Adaptive Model (Selected)",
 };
 
 export default function CsvChart({ data = [], zoomRange = null }) {
