@@ -11,6 +11,29 @@ import React, { useMemo, useState } from "react";
  * - data: array de {t, chosen_model, error_rel, error_abs, y_real, y_pred}
  * - onRowHover: callback cuando el usuario hace hover en una fila
  */
+
+// Helper: formatear error relativo con clamp visual
+const formatErrorRel = (val) => {
+  if (val == null || val === undefined) return "—";
+  const num = parseFloat(val);
+  if (!isFinite(num)) return "⚠️ N/A";
+  // Clamp visual para evitar mostrar valores absurdos
+  if (Math.abs(num) > 100) {
+    return num > 0 ? ">100%" : "<-100%";
+  }
+  return `${num.toFixed(2)}%`;
+};
+
+// Helper: color del error relativo
+const getErrorRelColor = (val) => {
+  if (val == null || !isFinite(val)) return "#999";
+  const absVal = Math.abs(val);
+  if (absVal > 50) return "#FF4444";  // Rojo fuerte
+  if (absVal > 20) return "#FF6B6B";  // Rojo
+  if (absVal > 10) return "#FFD93D";  // Amarillo
+  return "#4ECDC4";  // Verde
+};
+
 export default function AP2SelectorTable({ data = [], onRowHover, maxRows = 1000 }) {
   const [sortConfig, setSortConfig] = useState({ key: "t", direction: "asc" });
   const [filterModel, setFilterModel] = useState(null);
@@ -197,12 +220,11 @@ export default function AP2SelectorTable({ data = [], onRowHover, maxRows = 1000
                     padding: "8px",
                     textAlign: "right",
                     borderRight: "1px solid #333",
-                    color: row.error_rel != null
-                      ? Math.abs(row.error_rel) > 10 ? "#FF6B6B" : "#4ECDC4"
-                      : "#999",
+                    color: getErrorRelColor(row.error_rel),
+                    fontWeight: Math.abs(row.error_rel) > 50 ? "bold" : "normal",
                   }}
                 >
-                  {row.error_rel != null ? row.error_rel.toFixed(2) : "—"}
+                  {formatErrorRel(row.error_rel)}
                 </td>
                 <td
                   style={{

@@ -458,12 +458,16 @@ def get_series(
             })
 
         # punto plano para CsvChart y LivePredictionChart
+        # AP1 FIX: y_adaptive DEBE ser exactamente el valor del modelo elegido, no la predicción híbrida
+        y_adaptive = b["models"].get(chosen) if chosen and chosen in b["models"] else c_val
+        
         point = {
             "t": int(t.timestamp() * 1000),  # epoch ms
             "timestamp": t.isoformat(),      # ISO timestamp para LivePredictionChart
             "var": a_val,                    # valor observado
-            "yhat": c_val,                   # predicción híbrida (para compatibilidad)
-            "prediction": c_val,             # predicción híbrida
+            "yhat": y_adaptive,              # AP1: EXACTAMENTE el modelo elegido
+            "prediction": c_val,             # predicción híbrida (legacy)
+            "y_adaptive": y_adaptive,        # AP1: campo explícito para verificación
             "chosen_model": chosen,          # AP2: modelo elegido
             "chosen_error_abs": err_info.get("error_abs"),  # AP2: error absoluto
             "chosen_error_rel": err_info.get("error_rel"),  # AP2: error relativo

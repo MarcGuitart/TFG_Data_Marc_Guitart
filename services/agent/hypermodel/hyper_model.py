@@ -133,13 +133,21 @@ class HyperModel:
         # --- 1) Calcular errores de predicción ---
         errors_abs = {}
         errors_rel = {}
+        EPS_REL = 0.01  # Epsilon para evitar división por valores muy pequeños
+        MAX_ERR_REL = 100.0  # Clamp máximo para error relativo (±100%)
+        
         for name, y_pred in self._last_preds.items():
             e_abs = abs(y_true - y_pred)
             errors_abs[name] = e_abs
-            if abs(y_true) > 1e-9:
+            
+            # Error relativo con protección contra división por cero y clamp
+            if abs(y_true) > EPS_REL:
                 e_rel = ((y_pred - y_true) / y_true) * 100.0
+                # Clamp para evitar valores absurdos (-700%, +2500%, etc.)
+                e_rel = max(-MAX_ERR_REL, min(MAX_ERR_REL, e_rel))
             else:
-                e_rel = 0.0 if abs(y_pred) < 1e-9 else float('inf')
+                # Si real es ~0, usar error absoluto como proxy o marcar como N/A
+                e_rel = 0.0 if abs(y_pred) < EPS_REL else (100.0 if y_pred > 0 else -100.0)
             errors_rel[name] = e_rel
         
         self._last_errors = errors_abs
