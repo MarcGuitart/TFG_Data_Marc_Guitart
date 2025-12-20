@@ -1,185 +1,251 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 
 /**
- * AP2SelectorTable: Displays the selector table showing which model was chosen at each step
- * Shows: step, time, actual value, chosen model, all model predictions, and error metrics
+ * AP2: Tabla del selector adaptativo con:
+ * - Timestamp
+ * - Modelo elegido
+ * - Error relativo puntual (%)
+ * - Error absoluto
+ * 
+ * Props:
+ * - data: array de {t, chosen_model, error_rel, error_abs, y_real, y_pred}
+ * - onRowHover: callback cuando el usuario hace hover en una fila
  */
-export default function AP2SelectorTable({ data = [], maxRows = 100 }) {
-  const displayData = useMemo(() => {
-    if (!Array.isArray(data) || data.length === 0) return [];
-    return data.slice(0, maxRows);
-  }, [data, maxRows]);
 
-  if (displayData.length === 0) {
+// Helper: formatear error relativo con clamp visual
+const formatErrorRel = (val) => {
+  if (val == null || val === undefined) return "—";
+  const num = parseFloat(val);
+  if (!isFinite(num)) return "⚠️ N/A";
+  // Clamp visual para evitar mostrar valores absurdos
+  if (Math.abs(num) > 100) {
+    return num > 0 ? ">100%" : "<-100%";
+  }
+  return `${num.toFixed(2)}%`;
+};
+
+// Helper: color del error relativo
+const getErrorRelColor = (val) => {
+  if (val == null || !isFinite(val)) return "#999";
+  const absVal = Math.abs(val);
+  if (absVal > 50) return "#FF4444";  // Rojo fuerte
+  if (absVal > 20) return "#FF6B6B";  // Rojo
+  if (absVal > 10) return "#FFD93D";  // Amarillo
+  return "#4ECDC4";  // Verde
+};
+
+export default function AP2SelectorTable({ data = [], onRowHover, maxRows = 1000 }) {
+  const [sortConfig, setSortConfig] = useState({ key: "t", direction: "asc" });
+  const [filterModel, setFilterModel] = useState(null);
+
+  const processedData = useMemo(() => {
+    let rows = Array.isArray(data) ? data.slice(0, maxRows) : [];
+    
+    // Filtrar por modelo si está seleccionado
+    if (filterModel) {
+      rows = rows.filter((r) => r.chosen_model === filterModel);
+    }
+    
+    // Ordenar
+    rows.sort((a, b) => {
+      const aVal = a[sortConfig.key];
+      const bVal = b[sortConfig.key];
+      
+      if (aVal == null) return 1;
+      if (bVal == null) return -1;
+      if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
+      if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
+      return 0;
+    });
+    
+    return rows;
+  }, [data, sortConfig, filterModel, maxRows]);
+
+  const handleSort = (key) => {
+    setSortConfig((prev) => ({
+      key,
+      direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc",
+    }));
+  };
+
+  const uniqueModels = useMemo(() => {
+    const models = new Set();
+    (Array.isArray(data) ? data : []).forEach((r) => {
+      if (r.chosen_model) models.add(r.chosen_model);
+    });
+    return Array.from(models).sort();
+  }, [data]);
+
+  const formatTime = (t) => {
+    try {
+      return new Date(t).toLocaleString();
+    } catch {
+      return String(t);
+    }
+  };
+
+  const sortArrow = (key) => {
+    if (sortConfig.key !== key) return " ↕";
+    return sortConfig.direction === "asc" ? " ↑" : " ↓";
+  };
+
+  if (!processedData.length) {
     return (
-      <div style={{ padding: "16px", color: "#888", fontSize: 12 }}>
-        No data available
+      <div style={{ width: "100%", marginTop: 20 }}>
+        <h3>AP2: Tabla del Selector Adaptativo</h3>
+        <p style={{ color: "#ccc" }}>(no hay datos)</p>
       </div>
     );
   }
 
-  // Detectar modelos disponibles
-  const models = useMemo(() => {
-    const modelSet = new Set();
-    for (const row of displayData) {
-      Object.keys(row).forEach(k => {
-        if (!["t", "var", "prediction", "chosen_model", "error", "error_abs", "error_rel"].includes(k) && typeof row[k] === "number") {
-          modelSet.add(k);
-        }
-      });
-    }
-    return Array.from(modelSet).sort();
-  }, [displayData]);
-
-  const modelColors = {
-    "kalman": "#10B981",
-    "linear": "#3B82F6",
-    "poly": "#EC4899",
-    "alphabeta": "#F59E0B",
-    "ab_fast": "#10B981",
-    "linear_8": "#6366F1",
-    "poly2_12": "#EC4899",
-  };
-
-  const getModelColor = (modelName) => {
-    // Match by exact name or partial match
-    for (const [key, color] of Object.entries(modelColors)) {
-      if (modelName.includes(key) || key.includes(modelName)) {
-        return color;
-      }
-    }
-    return "#888";
-  };
-
   return (
-    <div style={{ overflowX: "auto", marginTop: 12 }}>
-      <table
-        style={{
-          width: "100%",
-          borderCollapse: "collapse",
-          fontSize: 11,
-          backgroundColor: "#0a0a0a",
-          border: "1px solid #333",
-        }}
-      >
-        <thead>
-          <tr style={{ background: "#1a1a1a", borderBottom: "2px solid #444" }}>
-            <th style={{ padding: "8px", textAlign: "left", color: "#00A3FF", fontWeight: 600, minWidth: 40 }}>
-              Step
-            </th>
-            <th style={{ padding: "8px", textAlign: "left", color: "#00A3FF", fontWeight: 600, minWidth: 100 }}>
-              Time
-            </th>
-            <th style={{ padding: "8px", textAlign: "right", color: "#00A3FF", fontWeight: 600, minWidth: 70 }}>
-              Actual
-            </th>
-            <th style={{ padding: "8px", textAlign: "center", color: "#FF7A00", fontWeight: 600, minWidth: 80 }}>
-              Chosen Model
-            </th>
-            {models.map(model => (
+    <div style={{ width: "100%", marginTop: 20, marginBottom: 20 }}>
+      <h3>AP2: Tabla del Selector Adaptativo</h3>
+      <p style={{ fontSize: 12, color: "#666", marginBottom: 10 }}>
+        Cada fila muestra el modelo elegido, su error puntual (en % y valor absoluto) para cada timestamp.
+      </p>
+
+      {/* Filtros */}
+      <div style={{ marginBottom: 15, display: "flex", gap: 10, alignItems: "center" }}>
+        <label style={{ fontSize: 12 }}>Filtrar por modelo:</label>
+        <select
+          value={filterModel || ""}
+          onChange={(e) => setFilterModel(e.target.value || null)}
+          style={{ padding: "5px", fontSize: 12 }}
+        >
+          <option value="">Todos</option>
+          {uniqueModels.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </select>
+        <span style={{ fontSize: 11, color: "#999" }}>
+          Mostrando {processedData.length} de {data.length} filas
+        </span>
+      </div>
+
+      {/* Tabla */}
+      <div style={{ overflowX: "auto" }}>
+        <table
+          style={{
+            width: "100%",
+            borderCollapse: "collapse",
+            fontSize: 12,
+            backgroundColor: "#1e1e1e",
+            color: "#e0e0e0",
+          }}
+        >
+          <thead style={{ backgroundColor: "#2d2d2d", borderBottom: "2px solid #444" }}>
+            <tr>
               <th
-                key={model}
+                onClick={() => handleSort("t")}
                 style={{
-                  padding: "8px",
-                  textAlign: "right",
-                  color: getModelColor(model),
-                  fontWeight: 600,
-                  minWidth: 80,
-                  background: "rgba(0,163,255,0.05)",
+                  padding: "10px",
+                  textAlign: "left",
+                  cursor: "pointer",
+                  userSelect: "none",
+                  borderRight: "1px solid #444",
                 }}
               >
-                {model.length > 12 ? model.substring(0, 12) + "…" : model}
+                Time {sortArrow("t")}
               </th>
-            ))}
-            <th style={{ padding: "8px", textAlign: "right", color: "#00A3FF", fontWeight: 600, minWidth: 60 }}>
-              Error Abs
-            </th>
-            <th style={{ padding: "8px", textAlign: "right", color: "#00A3FF", fontWeight: 600, minWidth: 60 }}>
-              Error %
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {displayData.map((row, idx) => {
-            const chosenModel = row.chosen_model || "—";
-            const errorAbs = typeof row.error_abs === "number" ? row.error_abs : (typeof row.error === "number" ? row.error : null);
-            const errorRel = typeof row.error_rel === "number" ? row.error_rel : null;
-            const actual = typeof row.var === "number" ? row.var : null;
-
-            return (
+              <th
+                onClick={() => handleSort("chosen_model")}
+                style={{
+                  padding: "10px",
+                  textAlign: "left",
+                  cursor: "pointer",
+                  userSelect: "none",
+                  borderRight: "1px solid #444",
+                }}
+              >
+                Model {sortArrow("chosen_model")}
+              </th>
+              <th
+                onClick={() => handleSort("error_rel")}
+                style={{
+                  padding: "10px",
+                  textAlign: "right",
+                  cursor: "pointer",
+                  userSelect: "none",
+                  borderRight: "1px solid #444",
+                }}
+              >
+                Error (%) {sortArrow("error_rel")}
+              </th>
+              <th
+                onClick={() => handleSort("error_abs")}
+                style={{
+                  padding: "10px",
+                  textAlign: "right",
+                  cursor: "pointer",
+                  userSelect: "none",
+                  borderRight: "1px solid #444",
+                }}
+              >
+                Abs. Error {sortArrow("error_abs")}
+              </th>
+              <th style={{ padding: "10px", textAlign: "right", borderRight: "1px solid #444" }}>
+                Real
+              </th>
+              <th style={{ padding: "10px", textAlign: "right" }}>
+                Predicted
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {processedData.map((row, idx) => (
               <tr
                 key={idx}
+                onMouseEnter={() => onRowHover && onRowHover(row)}
+                onMouseLeave={() => onRowHover && onRowHover(null)}
                 style={{
-                  borderBottom: "1px solid #222",
-                  background: idx % 2 === 0 ? "#0a0a0a" : "#121212",
+                  backgroundColor: idx % 2 === 0 ? "#252525" : "#1e1e1e",
+                  borderBottom: "1px solid #333",
+                  cursor: "pointer",
                   transition: "background-color 0.2s",
                 }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = "#1a2a3a";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = idx % 2 === 0 ? "#0a0a0a" : "#121212";
-                }}
+                onMouseOver={(e) => (e.currentTarget.style.backgroundColor = "#333")}
+                onMouseOut={(e) => (e.currentTarget.style.backgroundColor = idx % 2 === 0 ? "#252525" : "#1e1e1e")}
               >
-                <td style={{ padding: "8px", textAlign: "left", color: "#888" }}>
-                  {idx + 1}
+                <td style={{ padding: "8px", borderRight: "1px solid #333" }}>
+                  {formatTime(row.t)}
                 </td>
-                <td style={{ padding: "8px", textAlign: "left", color: "#888", fontSize: 10 }}>
-                  {row.t ? new Date(row.t * 1000 || row.t).toLocaleString() : "—"}
+                <td style={{ padding: "8px", borderRight: "1px solid #333", fontWeight: "bold", color: "#00D9FF" }}>
+                  {row.chosen_model}
                 </td>
-                <td style={{ padding: "8px", textAlign: "right", color: "#fff", fontWeight: 500 }}>
-                  {actual !== null ? actual.toFixed(3) : "—"}
+                <td
+                  style={{
+                    padding: "8px",
+                    textAlign: "right",
+                    borderRight: "1px solid #333",
+                    color: getErrorRelColor(row.error_rel),
+                    fontWeight: Math.abs(row.error_rel) > 50 ? "bold" : "normal",
+                  }}
+                >
+                  {formatErrorRel(row.error_rel)}
                 </td>
-                <td style={{ padding: "8px", textAlign: "center", color: "#FF7A00", fontWeight: 600 }}>
-                  {chosenModel}
+                <td
+                  style={{
+                    padding: "8px",
+                    textAlign: "right",
+                    borderRight: "1px solid #333",
+                    color: row.error_abs != null ? "#FFD93D" : "#999",
+                  }}
+                >
+                  {row.error_abs != null ? row.error_abs.toFixed(4) : "—"}
                 </td>
-                {models.map(model => {
-                  const value = typeof row[model] === "number" ? row[model] : null;
-                  return (
-                    <td
-                      key={model}
-                      style={{
-                        padding: "8px",
-                        textAlign: "right",
-                        color: getModelColor(model),
-                        fontWeight: row[model] === row.prediction ? 700 : 400,
-                        background: row.chosen_model === model ? "rgba(255,122,0,0.1)" : "transparent",
-                      }}
-                    >
-                      {value !== null ? value.toFixed(3) : "—"}
-                    </td>
-                  );
-                })}
-                <td style={{ padding: "8px", textAlign: "right", color: errorAbs !== null && errorAbs > 0.5 ? "#f87171" : "#86efac" }}>
-                  {errorAbs !== null ? errorAbs.toFixed(3) : "—"}
+                <td style={{ padding: "8px", textAlign: "right", borderRight: "1px solid #333" }}>
+                  {row.y_real != null ? row.y_real.toFixed(2) : "—"}
                 </td>
-                <td style={{ padding: "8px", textAlign: "right", color: errorRel !== null && errorRel > 10 ? "#f87171" : "#86efac" }}>
-                  {errorRel !== null ? errorRel.toFixed(1) : "—"}%
+                <td style={{ padding: "8px", textAlign: "right" }}>
+                  {row.y_pred != null ? row.y_pred.toFixed(2) : "—"}
                 </td>
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
-
-      {displayData.length > 0 && (
-        <div style={{ marginTop: 12, fontSize: 11, color: "#666" }}>
-          Showing <strong>{displayData.length}</strong> of <strong>{data.length}</strong> rows
-          {data.length > maxRows && ` (max ${maxRows} rows)`}
-        </div>
-      )}
-
-      <div style={{ marginTop: 16, padding: "12px", background: "#1a1a1a", borderRadius: "6px", fontSize: 11, color: "#888" }}>
-        <div style={{ marginBottom: 8 }}>
-          <strong style={{ color: "#00A3FF" }}>📋 AP2 Selector Adaptativo:</strong>
-        </div>
-        <ul style={{ margin: 0, paddingLeft: 20 }}>
-          <li>Shows the model selected at each step (AP2 Adaptive Selector)</li>
-          <li>Color-coded columns for each model prediction</li>
-          <li>Highlighted row shows which model was chosen (orange background)</li>
-          <li>Error columns (absolute and relative %) show prediction accuracy</li>
-          <li>Models with best predictions typically chosen have lower error values</li>
-        </ul>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );
