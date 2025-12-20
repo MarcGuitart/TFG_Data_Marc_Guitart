@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   LineChart,
   Line,
@@ -14,6 +14,14 @@ import "./LivePredictionChart.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8081";
 
+// Estados del pipeline
+const STATUS = {
+  IDLE: "idle",
+  RUNNING: "running",
+  FINISHED: "finished",
+  ERROR: "error",
+};
+
 export default function LivePredictionChart({ selectedId, isRunning }) {
   const [data, setData] = useState([]);
   const [stats, setStats] = useState({
@@ -21,21 +29,40 @@ export default function LivePredictionChart({ selectedId, isRunning }) {
     processedPoints: 0,
     progress: 0,
     avgError: 0,
-    status: "idle",
+    status: STATUS.IDLE,
   });
   const [windowSize, setWindowSize] = useState(50);
   const [autoScroll, setAutoScroll] = useState(true);
   const pollIntervalRef = useRef(null);
+  const lastCountRef = useRef(0);
+  const stableCountRef = useRef(0);
+
+  // Reset cuando cambia el ID seleccionado
+  useEffect(() => {
+    setData([]);
+    setStats({
+      totalPoints: 0,
+      processedPoints: 0,
+      progress: 0,
+      avgError: 0,
+      status: STATUS.IDLE,
+    });
+    lastCountRef.current = 0;
+    stableCountRef.current = 0;
+  }, [selectedId]);
 
   // Función para obtener datos en tiempo real
-  const fetchLiveData = async () => {
+  const fetchLiveData = useCallback(async () => {
     if (!selectedId) return;
 
     try {
       const res = await fetch(
         `${API_BASE}/api/series?id=${encodeURIComponent(selectedId)}&start=-1d`
       );
-      if (!res.ok) return;
+      if (!res.ok) {
+        setStats(prev => ({ ...prev, status: STATUS.ERROR }));
+        return;
+      }
 
       const jsonData = await res.json();
       if (!jsonData.data || !Array.isArray(jsonData.data)) return;
@@ -75,35 +102,65 @@ export default function LivePredictionChart({ selectedId, isRunning }) {
           ? errors.reduce((a, b) => a + b) / errors.length
           : 0;
 
+      // Detectar estado: si el conteo no cambia en 3 polls consecutivos, está terminado
+      if (processedPoints === lastCountRef.current) {
+        stableCountRef.current += 1;
+      } else {
+        stableCountRef.current = 0;
+      }
+      lastCountRef.current = processedPoints;
+
+      // Determinar estado del pipeline
+      let status;
+      if (!isRunning && processedPoints === 0) {
+        status = STATUS.IDLE;
+      } else if (isRunning && stableCountRef.current < 3) {
+        status = STATUS.RUNNING;
+      } else if (processedPoints > 0 && (stableCountRef.current >= 3 || progress >= 99.9)) {
+        status = STATUS.FINISHED;
+      } else {
+        status = isRunning ? STATUS.RUNNING : STATUS.IDLE;
+      }
+
       setData(chartData);
       setStats({
         totalPoints,
         processedPoints,
         progress,
         avgError: avgError.toFixed(4),
-        status: isRunning ? "processing" : "idle",
+        status,
       });
     } catch (err) {
       console.error("Error fetching live data:", err);
+      setStats(prev => ({ ...prev, status: STATUS.ERROR }));
     }
-  };
+  }, [selectedId, isRunning]);
 
-  // Polling cada 1 segundo mientras se está ejecutando
+  // Polling controlado
   useEffect(() => {
-    if (isRunning) {
+    // Limpiar intervalo anterior
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+
+    if (isRunning || stats.status === STATUS.RUNNING) {
       // Fetch inmediato
       fetchLiveData();
-
       // Polling cada 1 segundo
       pollIntervalRef.current = setInterval(fetchLiveData, 1000);
+    } else if (selectedId) {
+      // Fetch único cuando no está corriendo pero hay ID
+      fetchLiveData();
     }
 
     return () => {
       if (pollIntervalRef.current) {
         clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
       }
     };
-  }, [selectedId, isRunning]);
+  }, [selectedId, isRunning, fetchLiveData]);
 
   // Ventana dinámica: mostrar solo los últimos N puntos
   const displayData = autoScroll
@@ -162,7 +219,15 @@ export default function LivePredictionChart({ selectedId, isRunning }) {
         </div>
         <div className="progress-stats">
           <span>
-            Status: <strong>{stats.status === "processing" ? "▶️ EN DIRECTO" : "⏹️ Detenido"}</strong>
+            Status:{" "}
+            <strong
+              className={`status-badge status-${stats.status}`}
+            >
+              {stats.status === STATUS.IDLE && "⏸️ En espera"}
+              {stats.status === STATUS.RUNNING && "▶️ EN DIRECTO"}
+              {stats.status === STATUS.FINISHED && "✅ Completado"}
+              {stats.status === STATUS.ERROR && "❌ Error"}
+            </strong>
           </span>
           <span>
             Error Promedio: <strong>{stats.avgError}</strong>
