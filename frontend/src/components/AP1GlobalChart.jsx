@@ -6,14 +6,27 @@ import {
 const MODEL_NAMES = {
   var: "Real Traffic",
   prediction: "Adaptive Model",
+  linear: "Linear Model",
+  poly: "Polynomial Model",
+  alphabeta: "Alpha-Beta Model",
+  kalman: "Kalman Model",
+};
+
+const MODEL_COLORS = {
+  var: "#00A3FF",
+  prediction: "#FF7A00",
+  linear: "#3b82f6",
+  poly: "#10b981",
+  alphabeta: "#f59e0b",
+  kalman: "#8b5cf6",
 };
 
 /**
- * AP1: Gráfica GLOBAL de toda la serie con Real + Adaptativo.
+ * AP1: Gráfica GLOBAL de toda la serie con Real + Adaptativo + Todos los modelos.
  * Muestra "visión general del rendimiento" en todo el periodo.
  * 
  * Props:
- * - data: array de puntos con {t, var, prediction}
+ * - data: array de puntos con {t, var, prediction, linear, poly, alphabeta, kalman}
  */
 export default function AP1GlobalChart({ data = [] }) {
   const processedData = useMemo(() => {
@@ -26,6 +39,10 @@ export default function AP1GlobalChart({ data = [] }) {
           x,
           var: Number.isFinite(d?.var) ? d.var : undefined,
           prediction: Number.isFinite(d?.prediction) ? d.prediction : undefined,
+          linear: Number.isFinite(d?.linear) ? d.linear : undefined,
+          poly: Number.isFinite(d?.poly) ? d.poly : undefined,
+          alphabeta: Number.isFinite(d?.alphabeta) ? d.alphabeta : undefined,
+          kalman: Number.isFinite(d?.kalman) ? d.kalman : undefined,
         };
       })
       .filter((d) => d && d.x && (Number.isFinite(d.var) || Number.isFinite(d.prediction)));
@@ -51,7 +68,8 @@ export default function AP1GlobalChart({ data = [] }) {
     <div style={{ width: "100%", marginBottom: 20 }}>
       <h3>AP1: Vista global de la serie completa</h3>
       <p style={{ fontSize: 12, color: "#666" }}>
-        Línea azul: valor real observado. Línea naranja: predicción del modelo adaptativo.
+        Línea azul: valor real observado. Línea naranja (gruesa): predicción del modelo adaptativo.
+        Líneas finas: predicciones individuales de cada modelo (Linear, Poly, Alpha-Beta, Kalman).
       </p>
 
       <div style={{ width: "100%", height: 350 }}>
@@ -79,19 +97,61 @@ export default function AP1GlobalChart({ data = [] }) {
               type="monotone"
               dataKey="var"
               name="var"
-              stroke="#00A3FF"
+              stroke={MODEL_COLORS.var}
               strokeWidth={2}
               dot={false}
               connectNulls
             />
 
-            {/* Adaptive */}
+            {/* Adaptive Model (principal, más gruesa) */}
             <Line
               type="monotone"
               dataKey="prediction"
               name="prediction"
-              stroke="#FF7A00"
+              stroke={MODEL_COLORS.prediction}
               strokeWidth={2.5}
+              dot={false}
+              connectNulls
+            />
+
+            {/* Modelos individuales (líneas finas semi-transparentes) */}
+            <Line
+              type="monotone"
+              dataKey="linear"
+              name="linear"
+              stroke={MODEL_COLORS.linear}
+              strokeWidth={1}
+              strokeOpacity={0.6}
+              dot={false}
+              connectNulls
+            />
+            <Line
+              type="monotone"
+              dataKey="poly"
+              name="poly"
+              stroke={MODEL_COLORS.poly}
+              strokeWidth={1}
+              strokeOpacity={0.6}
+              dot={false}
+              connectNulls
+            />
+            <Line
+              type="monotone"
+              dataKey="alphabeta"
+              name="alphabeta"
+              stroke={MODEL_COLORS.alphabeta}
+              strokeWidth={1}
+              strokeOpacity={0.6}
+              dot={false}
+              connectNulls
+            />
+            <Line
+              type="monotone"
+              dataKey="kalman"
+              name="kalman"
+              stroke={MODEL_COLORS.kalman}
+              strokeWidth={1}
+              strokeOpacity={0.6}
               dot={false}
               connectNulls
             />

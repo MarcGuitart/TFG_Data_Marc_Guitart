@@ -252,9 +252,21 @@
   color: #7c3aed;
 }
 
+/* Colores de error por severidad */
+.table-error-medium {
+  color: #f59e0b;
+  font-weight: 600;
+}
+
 .table-error-high {
   color: #dc2626;
   font-weight: 600;
+}
+
+.table-error-critical {
+  color: #991b1b;
+  font-weight: 700;
+  background-color: #fee2e2;
 }
 
 /* Leyenda */
@@ -321,10 +333,4 @@
   }
 }
 
-.live-prediction-chart-container {
-  animation: pulse 2s ease-in-out infinite;
-}
-
-.live-prediction-chart-container.idle {
-  animation: none;
-}
+/* Animación solo en badge RUNNING, no en todo el contenedor */
