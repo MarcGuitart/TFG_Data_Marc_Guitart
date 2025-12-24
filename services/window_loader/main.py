@@ -92,13 +92,21 @@ def _emit_dataframe(df: pd.DataFrame, speed_ms: int = 0):
     t1 = rows[-1]["timestamp"] if rows else None
     print(f"[loader] ids={ids}  rows={len(rows)}  window=[{t0} .. {t1}]  speed_ms={speed_ms}")
 
-    # envío
+    # envío con flush periódico cada 50 mensajes para evitar pérdidas
+    FLUSH_EVERY = 50
+    
     if BATCH_SIZE <= 1:
-        for r in rows:
+        for i, r in enumerate(rows):
             prod.send(TOPIC_AGENT_IN, r)
             # copia normalizada opcional al topic RAW
             if TOPIC_RAW:
                 prod.send(TOPIC_RAW, r)
+            
+            # Flush periódico cada 50 mensajes
+            if (i + 1) % FLUSH_EVERY == 0:
+                prod.flush()
+                print(f"[loader] flushed {i+1}/{len(rows)} mensajes")
+            
             if speed_ms > 0:
                 time.sleep(speed_ms / 1000.0)
     else:
@@ -113,7 +121,14 @@ def _emit_dataframe(df: pd.DataFrame, speed_ms: int = 0):
             if speed_ms > 0:
                 time.sleep(speed_ms / 1000.0)
 
+    # Flush final para asegurar que todos los mensajes se envíen
     prod.flush()
+    print(f"[loader] ✅ flush final: {len(rows)} mensajes enviados")
+    
+    # Cerrar producer correctamente
+    prod.close()
+    print(f"[loader] ✅ producer cerrado correctamente")
+
 
 @app.post("/trigger")
 async def trigger_window_loader(payload: dict = {}):

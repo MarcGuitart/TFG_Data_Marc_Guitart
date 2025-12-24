@@ -2,7 +2,8 @@
 import os, math
 from typing import List, Dict, Any
 from decimal import Decimal
-from fastapi.responses import JSONResponse
+from datetime import datetime, timedelta
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi import APIRouter, Query, HTTPException
 from influxdb_client import InfluxDBClient
 from fastapi import FastAPI, UploadFile, File
@@ -10,6 +11,9 @@ from fastapi.middleware.cors import CORSMiddleware
 import csv
 from io import StringIO
 import logging
+
+# Import ScenarioManager
+from scenarios import ScenarioManager
 
 # Reutiliza las mismas ENV que el resto del servicio
 INFLUX_URL    = os.getenv("INFLUX_URL", "http://influxdb:8086")
@@ -893,6 +897,54 @@ def proxy_agent_stats(unit_id: str):
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Agent unavailable: {e}")
 
+@app.get("/api/download_weights/{unit_id}")
+def download_weights_csv(unit_id: str):
+    """
+    Descarga el historial de pesos como CSV.
+    1. Pide al agente el historial completo
+    2. Convierte a CSV y devuelve como archivo descargable
+    """
+    try:
+        # Obtener historial del agente
+        r = httpx.get(f"{AGENT_URL}/api/history/{unit_id}", params={"last_n": 999999}, timeout=30.0)
+        r.raise_for_status()
+        data = r.json()
+        
+        history = data.get("history", [])
+        if not history:
+            raise HTTPException(status_code=404, detail=f"No history for {unit_id}")
+        
+        # Convertir a CSV
+        output = StringIO()
+        fieldnames = list(history[0].keys())
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        writer.writeheader()
+        
+        for entry in history:
+            # Redondear floats para legibilidad
+            row = {}
+            for k, v in entry.items():
+                if isinstance(v, float):
+                    row[k] = round(v, 6)
+                else:
+                    row[k] = v
+            writer.writerow(row)
+        
+        # Devolver como archivo descargable
+        output.seek(0)
+        filename = f"weights_history_{unit_id}.csv"
+        
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+        
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Error generating CSV: {e}")
+
 @app.post("/api/agent/export_csv/{unit_id}")
 def proxy_agent_export_csv(unit_id: str):
     """AP3: Exportar historial a CSV"""
@@ -952,6 +1004,71 @@ def run_window(source: str = Query("uploaded.csv"), speed_ms: int = Query(0)):
         raise HTTPException(status_code=500, detail=f"loader trigger failed: {str(e)}")
 
 
+@app.post("/api/reset_system")
+def reset_system():
+    """
+    Resetea completamente el sistema para empezar un nuevo experimento desde cero:
+    1. Limpia deduplicación del collector
+    2. Resetea todos los HyperModels del agent (pesos e historial)
+    3. Opcionalmente limpia InfluxDB (comentado por seguridad)
+    
+    Útil antes de ejecutar un nuevo pipeline para evitar acumulación de datos previos.
+    """
+    results = {
+        "collector": {"status": "pending"},
+        "agent": {"status": "pending"},
+        "influxdb": {"status": "skipped", "message": "Manual cleanup required"}
+    }
+    
+    # 1. Reset Collector (deduplicación)
+    try:
+        r_collector = httpx.post(COLLECTOR_RESET, timeout=10.0)
+        r_collector.raise_for_status()
+        results["collector"] = {"status": "success", "response": r_collector.json()}
+    except Exception as e:
+        results["collector"] = {"status": "error", "message": str(e)}
+    
+    # 2. Reset Agent (todos los HyperModels)
+    try:
+        r_agent = httpx.post(f"{AGENT_URL}/api/reset_all", timeout=10.0)
+        r_agent.raise_for_status()
+        results["agent"] = {"status": "success", "response": r_agent.json()}
+    except Exception as e:
+        results["agent"] = {"status": "error", "message": str(e)}
+    
+    # 3. InfluxDB cleanup (OPCIONAL - comentado por seguridad)
+    # Si quieres limpiar InfluxDB, descomenta esto:
+    # try:
+    #     from influxdb_client import InfluxDBClient
+    #     from influxdb_client.client.delete_api import DeleteApi
+    #     
+    #     client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
+    #     delete_api = client.delete_api()
+    #     
+    #     # Borrar últimos 7 días de telemetry
+    #     start = "1970-01-01T00:00:00Z"
+    #     stop = (datetime.utcnow() + timedelta(days=1)).isoformat() + "Z"
+    #     delete_api.delete(start, stop, '_measurement="telemetry"', 
+    #                       bucket=INFLUX_BUCKET, org=INFLUX_ORG)
+    #     
+    #     results["influxdb"] = {"status": "success", "message": "Telemetry data deleted"}
+    # except Exception as e:
+    #     results["influxdb"] = {"status": "error", "message": str(e)}
+    
+    # Determinar status global
+    all_success = (
+        results["collector"]["status"] == "success" and
+        results["agent"]["status"] == "success"
+    )
+    
+    return {
+        "status": "success" if all_success else "partial",
+        "timestamp": datetime.utcnow().isoformat(),
+        "details": results,
+        "message": "Sistema reseteado. Listo para nuevo experimento." if all_success else "Reseteo parcial. Revisa detalles."
+    }
+
+
 # Uploads
 UPLOAD_DIR = "/app/data"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -980,3 +1097,123 @@ async def upload_csv(file: UploadFile = File(...)):
         "path": dest_path,
         "rows": rows,
     }
+
+# ==== GESTIÓN DE ESCENARIOS ====================================================
+
+@app.post("/api/scenarios/save")
+def save_scenario_endpoint(
+    scenario_name: str = Query(..., description="Nombre del escenario (ej: escenario_0_baseline)"),
+    unit_id: str = Query("Other", description="ID de la serie temporal")
+):
+    """
+    Guarda el estado actual como un escenario para análisis posterior.
+    
+    Incluye:
+    - Configuración del hypermodel (modo, decay, etc.)
+    - Métricas agregadas (MAE, RMSE, distribución de modelos)
+    - Historial completo de pesos
+    """
+    try:
+        # 1. Obtener configuración del agente
+        config_res = httpx.get(f"{AGENT_URL}/api/weights/{unit_id}", timeout=10.0)
+        config_res.raise_for_status()
+        config = {"hypermodel_mode": os.getenv("HYPERMODEL_MODE", "adaptive")}
+        
+        # 2. Obtener métricas agregadas del orchestrator
+        metrics_res = httpx.get(f"http://localhost:8081/api/metrics/models/ranked", 
+                                 params={"id": unit_id}, timeout=10.0)
+        metrics_res.raise_for_status()
+        metrics_data = metrics_res.json()
+        
+        # 3. Obtener historial completo del agente
+        history_res = httpx.get(f"{AGENT_URL}/api/history/{unit_id}", 
+                                params={"last_n": 999999}, timeout=30.0)
+        history_res.raise_for_status()
+        history = history_res.json().get("history", [])
+        
+        # 4. Guardar escenario
+        filepath = ScenarioManager.save_scenario(
+            scenario_name=scenario_name,
+            unit_id=unit_id,
+            config=config,
+            metrics=metrics_data,
+            history=history,
+            metadata={
+                "saved_from": "ui_button",
+                "csv_source": "uploaded.csv"
+            }
+        )
+        
+        return {
+            "success": True,
+            "scenario_name": scenario_name,
+            "filepath": filepath,
+            "history_length": len(history),
+            "metrics": metrics_data
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error saving scenario: {e}")
+
+@app.get("/api/scenarios/list")
+def list_scenarios_endpoint():
+    """Lista todos los escenarios guardados"""
+    try:
+        scenarios = ScenarioManager.list_scenarios()
+        return {
+            "scenarios": scenarios,
+            "total": len(scenarios)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error listing scenarios: {e}")
+
+@app.get("/api/scenarios/load/{scenario_name}")
+def load_scenario_endpoint(scenario_name: str):
+    """Carga un escenario específico"""
+    try:
+        # Buscar archivo más reciente con ese nombre
+        from pathlib import Path
+        matches = list(Path("/app/data/scenarios").glob(f"{scenario_name}*.json"))
+        if not matches:
+            raise HTTPException(status_code=404, detail=f"Scenario {scenario_name} not found")
+        
+        latest = max(matches, key=lambda p: p.stat().st_mtime)
+        data = ScenarioManager.load_scenario(str(latest))
+        return data
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error loading scenario: {e}")
+
+@app.post("/api/scenarios/compare")
+def compare_scenarios_endpoint(scenario_names: List[str]):
+    """Compara múltiples escenarios lado a lado"""
+    try:
+        comparison = ScenarioManager.compare_scenarios(scenario_names)
+        return comparison
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error comparing scenarios: {e}")
+
+@app.delete("/api/scenarios/delete/{scenario_name}")
+def delete_scenario_endpoint(scenario_name: str):
+    """Elimina un escenario guardado"""
+    try:
+        from pathlib import Path
+        matches = list(Path("/app/data/scenarios").glob(f"{scenario_name}*.json"))
+        if not matches:
+            raise HTTPException(status_code=404, detail=f"Scenario {scenario_name} not found")
+        
+        latest = max(matches, key=lambda p: p.stat().st_mtime)
+        success = ScenarioManager.delete_scenario(str(latest))
+        
+        if success:
+            return {"success": True, "deleted": str(latest)}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to delete scenario")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error deleting scenario: {e}")
+

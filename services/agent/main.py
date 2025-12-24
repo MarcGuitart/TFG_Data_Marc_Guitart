@@ -136,6 +136,58 @@ def export_csv(unit_id: str):
     result = hm.export_history_csv(filepath)
     return {"unit_id": unit_id, "filepath": result}
 
+@app.post("/api/reset/{unit_id}")
+def reset_hypermodel(unit_id: str):
+    """
+    Resetea el HyperModel de una unidad específica:
+    - Reinicia pesos a 0
+    - Limpia historial de predicciones
+    - Resetea contadores
+    - Resetea buffers de modelos base (para reproducibilidad)
+    
+    Útil para empezar experimentos desde cero sin acumulación de memoria previa.
+    """
+    hm = hyper_by_id.get(unit_id)
+    if not hm:
+        return {"error": f"No HyperModel for {unit_id}", "status": "not_found"}
+    
+    # Reset completo (incluye modelos base)
+    hm.reset_complete()
+    
+    log.info(f"[reset] HyperModel reseteado completamente para {unit_id}")
+    
+    return {
+        "status": "reset",
+        "unit_id": unit_id,
+        "weights": dict(hm.w),
+        "history_length": len(hm._history),
+        "message": f"HyperModel {unit_id} reiniciado a estado inicial (incluye buffers de modelos base)"
+    }
+
+@app.post("/api/reset_all")
+def reset_all_hypermodels():
+    """
+    Resetea TODOS los HyperModels activos.
+    Útil para limpiar completamente el sistema antes de un nuevo experimento.
+    """
+    reset_count = 0
+    unit_ids = []
+    
+    for unit_id, hm in list(hyper_by_id.items()):
+        # Reset completo (incluye modelos base)
+        hm.reset_complete()
+        
+        reset_count += 1
+        unit_ids.append(unit_id)
+        log.info(f"[reset_all] HyperModel reseteado completamente para {unit_id}")
+    
+    return {
+        "status": "reset_all",
+        "reset_count": reset_count,
+        "unit_ids": unit_ids,
+        "message": f"{reset_count} HyperModels reiniciados completamente"
+    }
+
 # === CLIENTES Influx ===
 client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
 delete_api: DeleteApi = client.delete_api()
@@ -314,7 +366,7 @@ def main():
         value_deserializer=lambda v: json.loads(v.decode("utf-8")),
         auto_offset_reset="earliest",
         enable_auto_commit=True,
-        group_id="agent-v1"
+        group_id="agent-v2-greedy"  # Cambiar para resetear offset
     )
     producer = KafkaProducer(
         bootstrap_servers=BROKER,

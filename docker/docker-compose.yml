@@ -95,7 +95,7 @@ services:
       - LEARN_PERIOD_SEC=86400
       - HYPERMODEL_CONFIG=/app/hypermodel/model_config.json
       - HYPERMODEL_DECAY=0.95
-      - HYPERMODEL_MODE=adaptive
+      - HYPERMODEL_MODE=weighted_ensemble
       - PYTHONPATH=/app
       - HYPERMODEL_CONFIG=/app/hypermodel/model_config.json
       - HYPERMODEL_W_CAP=10.0

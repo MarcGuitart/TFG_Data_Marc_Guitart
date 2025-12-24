@@ -65,10 +65,16 @@ export default function LivePredictionChart({ selectedId, isRunning }) {
       }
 
       const jsonData = await res.json();
-      if (!jsonData.data || !Array.isArray(jsonData.data)) return;
+      
+      // Normalizar datos: soporta tanto "data" como "points" (ANTES del early return)
+      const rawData = jsonData.data || jsonData.points || [];
+      if (!Array.isArray(rawData) || rawData.length === 0) {
+        console.warn("LivePredictionChart: sin datos o formato inválido", jsonData);
+        return;
+      }
 
       // Transformar datos para la gráfica
-      const chartData = jsonData.data.map((point, idx) => {
+      const chartData = rawData.map((point, idx) => {
         const error =
           point.var && point.yhat
             ? Math.abs(point.var - point.yhat)
@@ -86,7 +92,7 @@ export default function LivePredictionChart({ selectedId, isRunning }) {
           error: error,
           chosen: point.chosen_model || "-",
           errorAbs: point.chosen_error_abs || null,
-          errorRel: point.chosen_error_rel || null,
+          errorRel: point.chosen_error_rel || null, // Ya viene en % desde backend
         };
       });
 
@@ -176,7 +182,7 @@ export default function LivePredictionChart({ selectedId, isRunning }) {
   return (
     <div className="live-prediction-chart-container">
       <div className="live-header">
-        <h3>🎯 Live Prediction Chart</h3>
+        <h3>🎯 Predicción en Tiempo Real</h3>
         <div className="live-controls">
           <label>
             Window Size:
@@ -240,7 +246,7 @@ export default function LivePredictionChart({ selectedId, isRunning }) {
         {displayData.length === 0 ? (
           <div className="live-empty">
             <p>Esperando datos...</p>
-            <p className="text-small">Carga un CSV y ejecuta el agente para ver la predicción en vivo</p>
+            <p className="text-small">Carga un CSV y ejecuta el pipeline para ver las predicciones en tiempo real</p>
           </div>
         ) : (
           <ResponsiveContainer width="100%" height={400}>
@@ -356,20 +362,32 @@ export default function LivePredictionChart({ selectedId, isRunning }) {
               </tr>
             </thead>
             <tbody>
-              {displayData.slice(-10).map((point) => (
-                <tr key={point.index}>
-                  <td className="table-index">{point.index}</td>
-                  <td>{formatNumber(point.actual)}</td>
-                  <td className="table-bold">{formatNumber(point.predicted)}</td>
-                  <td className={point.error > 0.1 ? "table-error-high" : ""}>
-                    {formatNumber(point.error)}
-                  </td>
-                  <td className="table-model">{point.chosen}</td>
-                  <td className={point.errorRel > 0.1 ? "table-error-high" : ""}>
-                    {point.errorRel ? (point.errorRel * 100).toFixed(2) : "-"}%
-                  </td>
-                </tr>
-              ))}
+              {displayData.slice(-10).map((point) => {
+                // errorRel ya viene en % desde backend (con clamp ±100%)
+                const errorRelValue = point.errorRel || 0;
+                const errorRelAbs = Math.abs(errorRelValue);
+                
+                // Colores por severidad
+                let errorRelClass = "";
+                if (errorRelAbs > 50) errorRelClass = "table-error-critical";
+                else if (errorRelAbs > 20) errorRelClass = "table-error-high";
+                else if (errorRelAbs > 10) errorRelClass = "table-error-medium";
+                
+                return (
+                  <tr key={point.index}>
+                    <td className="table-index">{point.index}</td>
+                    <td>{formatNumber(point.actual)}</td>
+                    <td className="table-bold">{formatNumber(point.predicted)}</td>
+                    <td className={point.error > 0.1 ? "table-error-high" : ""}>
+                      {formatNumber(point.error)}
+                    </td>
+                    <td className="table-model">{point.chosen}</td>
+                    <td className={errorRelClass}>
+                      {point.errorRel ? errorRelValue.toFixed(2) : "-"}%
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
