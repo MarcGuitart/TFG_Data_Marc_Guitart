@@ -17,15 +17,36 @@ MODEL_REGISTRY = {
 
 class HyperModel:
     """
-    HyperModel con sistema de pesos AP3.
+    HyperModel con sistema de pesos adaptativos para selección o combinación de modelos.
     
-    El sistema de pesos funciona así:
-    1. Decadencia: Se resta total_reward/N a cada modelo (bolsa distribuida equitativamente)
-    2. Ranking: Se ordenan modelos por error (menor a mayor)
-    3. Recompensa: Se asignan puntos según ranking (N al mejor, N-1 al segundo, ..., 1 al peor)
-    4. Selección: El modelo con mayor peso acumulado predice el siguiente punto
+    Modos de operación:
     
-    Esto crea "memoria" - un modelo no pierde todo su peso por un mal resultado puntual.
+    1. "adaptive" (AP3 original): 
+       - Sistema de ranking con memoria
+       - Decadencia: Se resta total_reward/N a cada modelo (bolsa distribuida equitativamente)
+       - Ranking: Se ordenan modelos por error (menor a mayor)
+       - Recompensa: Se asignan puntos según ranking (N al mejor, N-1 al segundo, ..., 1 al peor)
+       - Selección: El modelo con mayor peso acumulado predice el siguiente punto
+       - Crea "memoria" - un modelo no pierde todo su peso por un mal resultado puntual
+    
+    2. "greedy_adaptive":
+       - Sistema equilibrado que reduce momentum
+       - Decadencia: Todos pierden 1 punto
+       - Recompensa: Solo el ganador gana N puntos
+       - Selección: El modelo con mayor peso acumulado predice
+       
+    3. "greedy_weighted":
+       - Sistema simplificado
+       - Recompensa: +1 al ganador, -1/(N-1) a los perdedores
+       - Selección: El modelo con menor error en el step anterior predice
+       
+    4. "weighted_ensemble" (NUEVO):
+       - Sistema de ensemble ponderado adaptativamente
+       - Decadencia y recompensa como en AP3
+       - DIFERENCIA CLAVE: NO selecciona un único modelo
+       - La predicción es la MEDIA PONDERADA de todos los modelos según sus pesos
+       - Los modelos con mejor rendimiento tienen más influencia, pero todos contribuyen
+       - Evita que un solo modelo domine completamente
     """
     
     def __init__(self, cfg_path: str, decay: float = 0.9, eps: float = 1e-6, 
@@ -76,8 +97,11 @@ class HyperModel:
         """
         Genera predicciones de todos los modelos y devuelve la combinada.
         
-        En modo "weighted": promedio ponderado por pesos adaptativos
+        En modo "weighted": promedio ponderado por pesos adaptativos (LEGACY)
+        En modo "weighted_ensemble": promedio ponderado con pesos adaptativos actualizados (NUEVO)
         En modo "adaptive": usa solo el modelo con mayor peso actual (AP3)
+        En modo "greedy_weighted": usa el mejor modelo del último step (menor error) y pondera pesos
+        En modo "greedy_adaptive": usa el modelo con mayor peso actual (igual que adaptive)
         
         Returns:
             (y_hat_combined, {model_name: y_hat, ...})
@@ -85,8 +109,8 @@ class HyperModel:
         preds = {m.name: float(m.predict(series)) for m in self.models}
         self._last_preds = preds
         
-        if self.mode == "adaptive":
-            # AP3: Selector adaptativo - usa el modelo con MAYOR peso acumulado
+        if self.mode == "adaptive" or self.mode == "greedy_adaptive":
+            # AP3 y Greedy Adaptive: Selector adaptativo - usa el modelo con MAYOR peso acumulado
             if self.w:
                 best_model = max(self.w.keys(), key=lambda n: self.w[n])
                 self._last_chosen = best_model
@@ -95,8 +119,34 @@ class HyperModel:
                 best_model = next(iter(preds))
                 self._last_chosen = best_model
                 y_hat = preds[best_model]
+        elif self.mode == "greedy_weighted":
+            # NUEVO: Greedy + Weighted
+            # 1) Si tenemos errores del step anterior, elegir el modelo con MENOR error
+            if self._last_errors:
+                best_model = min(self._last_errors.keys(), key=lambda n: self._last_errors[n])
+                self._last_chosen = best_model
+                # 2) Usar su predicción para este step
+                y_hat = preds[best_model]
+            else:
+                # Primera iteración: usar promedio simple
+                best_model = next(iter(preds))
+                self._last_chosen = best_model
+                y_hat = sum(preds.values()) / len(preds)
+        elif self.mode == "weighted_ensemble":
+            # NUEVO: Weighted Ensemble - todos los modelos contribuyen
+            # La predicción final es la media ponderada de todas las predicciones
+            # Los pesos se actualizan según el rendimiento (AP3), pero NO se selecciona un único modelo
+            total_w = sum(max(self.w[n], 0.0) for n in preds)
+            if total_w <= self.eps:
+                # Si todos los pesos son ~0, usar promedio simple
+                y_hat = sum(preds.values()) / max(len(preds), 1)
+                self._last_chosen = "ensemble_equal"
+            else:
+                # Media ponderada por pesos adaptativos
+                y_hat = sum(preds[n] * max(self.w[n], 0.0) for n in preds) / total_w
+                self._last_chosen = "ensemble_weighted"
         else:
-            # Modo weighted: promedio ponderado
+            # Modo weighted (LEGACY): promedio ponderado
             total_w = sum(max(self.w[n], 0.0) for n in preds)
             if total_w <= self.eps:
                 y_hat = sum(preds.values()) / max(len(preds), 1)
@@ -109,12 +159,29 @@ class HyperModel:
         """
         AP3: Actualiza pesos con sistema de ranking y memoria.
         
-        Algoritmo:
+        Algoritmo según modo:
+        
+        MODO "adaptive" (AP3 original):
         1. Calcular errores de cada modelo
         2. DECADENCIA: restar (total_reward / N) a todos los modelos
         3. Ordenar por error (mejor a peor)
         4. RECOMPENSA: asignar N al mejor, N-1 al segundo, ..., 1 al peor
         5. Guardar historial para análisis
+        6. Seleccionar modelo con mayor peso para siguiente predicción
+        
+        MODO "greedy_weighted" (Greedy + Pesos simples):
+        1. Calcular errores de cada modelo
+        2. Identificar el MEJOR modelo (menor error)
+        3. RECOMPENSA SIMPLE: +1 al mejor, -1/(N-1) al resto
+        4. Los pesos se acumulan indefinidamente (memoria)
+        5. Predicción usa el mejor modelo del step anterior
+        
+        MODO "greedy_adaptive" (Nuevo modo equilibrado):
+        1. Calcular errores de cada modelo
+        2. DECADENCIA: restar 1 punto a todos los modelos
+        3. RECOMPENSA: Solo el ganador recibe N puntos
+        4. Neto: Ganador +(N-1), Perdedores -1
+        5. Reduce momentum, permite cambios más rápidos
         6. Seleccionar modelo con mayor peso para siguiente predicción
         
         Args:
@@ -154,34 +221,116 @@ class HyperModel:
         self._last_errors_rel = errors_rel
         self._last_y_true = y_true
         
-        # --- 2) DECADENCIA: Restar bolsa total repartida equitativamente ---
-        # Bolsa = N + (N-1) + ... + 1 = N*(N+1)/2
-        total_reward = sum(range(1, N + 1))
-        decay_share = total_reward / N
-        
         weights_before = dict(self.w)  # Guardar para historial
         
-        for name in self.model_names:
-            self.w[name] -= decay_share
-            # Opcional: truncar a 0 si no permitimos negativos
-            if not self.allow_negative and self.w[name] < 0:
-                self.w[name] = 0.0
-        
-        # --- 3) Ordenar por error ascendente (mejor primero) ---
+        # --- Ordenar por error ascendente (mejor primero) ---
         ranked = sorted(errors_abs.items(), key=lambda kv: kv[1])
+        chosen_by_error_simple = ranked[0][0]  # Mejor modelo por error
         
-        # --- 4) RECOMPENSA: N al mejor, N-1 al segundo, ..., 1 al peor ---
-        rewards = {}
-        for rank, (name, _) in enumerate(ranked):
-            reward = N - rank  # mejor → N puntos, peor → 1 punto
-            self.w[name] += reward
-            rewards[name] = reward
-        
-        # --- 5) Modelo elegido por error simple (para comparar) ---
-        chosen_by_error_simple = ranked[0][0]
-        
-        # --- 6) Modelo elegido por peso acumulado (AP3) ---
-        chosen_by_weight = max(self.model_names, key=lambda n: self.w[n])
+        if self.mode == "greedy_weighted":
+            # ========== MODO GREEDY_WEIGHTED ==========
+            # Sistema simplificado: +1 al ganador, -1/(N-1) a los perdedores
+            # Esto mantiene la suma de cambios = 0 (conservación de "energía")
+            
+            rewards = {}
+            penalty = -1.0 / (N - 1) if N > 1 else 0.0
+            
+            for name in self.model_names:
+                if name == chosen_by_error_simple:
+                    # Ganador: +1
+                    self.w[name] += 1.0
+                    rewards[name] = 1.0
+                else:
+                    # Perdedores: -1/(N-1)
+                    self.w[name] += penalty
+                    rewards[name] = penalty
+                
+                # Opcional: truncar a 0 si no permitimos negativos
+                if not self.allow_negative and self.w[name] < 0:
+                    self.w[name] = 0.0
+            
+            decay_share = 0.0  # No hay decadencia en modo greedy
+            chosen_by_weight = chosen_by_error_simple  # Siempre el mejor por error
+            
+        elif self.mode == "greedy_adaptive":
+            # ========== MODO GREEDY_ADAPTIVE (Nuevo modo equilibrado) ==========
+            # Sistema equilibrado: Solo el ganador recibe puntos positivos
+            # - Decadencia: Todos pierden 1 punto
+            # - Recompensa: Solo el ganador gana N puntos
+            # - Neto: Ganador: +(N-1), Resto: -1
+            # Esto reduce el momentum y permite cambios más rápidos
+            
+            rewards = {}
+            decay_share = 1.0  # Todos pierden 1 punto
+            
+            for name in self.model_names:
+                # Decadencia
+                self.w[name] -= decay_share
+                
+                if name == chosen_by_error_simple:
+                    # Ganador: +N puntos
+                    self.w[name] += N
+                    rewards[name] = N
+                else:
+                    # Perdedores: 0 puntos adicionales
+                    rewards[name] = 0
+                
+                # Opcional: truncar a 0 si no permitimos negativos
+                if not self.allow_negative and self.w[name] < 0:
+                    self.w[name] = 0.0
+            
+            # Modelo elegido por peso acumulado
+            chosen_by_weight = max(self.model_names, key=lambda n: self.w[n])
+            
+        elif self.mode == "weighted_ensemble":
+            # ========== MODO WEIGHTED_ENSEMBLE (Ensemble ponderado adaptativamente) ==========
+            # Sistema de ranking adaptativo (AP3) pero sin seleccionar un único modelo
+            # - Decadencia: Todos pierden bolsa/N
+            # - Recompensa: N al mejor, N-1 al segundo, ..., 1 al peor
+            # - Predicción: Media ponderada de TODOS los modelos según sus pesos
+            
+            # --- 2) DECADENCIA: Restar bolsa total repartida equitativamente ---
+            total_reward = sum(range(1, N + 1))
+            decay_share = total_reward / N
+            
+            for name in self.model_names:
+                self.w[name] -= decay_share
+                # Opcional: truncar a 0 si no permitimos negativos
+                if not self.allow_negative and self.w[name] < 0:
+                    self.w[name] = 0.0
+            
+            # --- 4) RECOMPENSA: N al mejor, N-1 al segundo, ..., 1 al peor ---
+            rewards = {}
+            for rank, (name, _) in enumerate(ranked):
+                reward = N - rank  # mejor → N puntos, peor → 1 punto
+                self.w[name] += reward
+                rewards[name] = reward
+            
+            # --- 6) No hay selección de modelo único, todos participan en ensemble ---
+            chosen_by_weight = "ensemble_weighted"
+            
+        else:
+            # ========== MODO ADAPTIVE/WEIGHTED (AP3 original o LEGACY) ==========
+            # --- 2) DECADENCIA: Restar bolsa total repartida equitativamente ---
+            # Bolsa = N + (N-1) + ... + 1 = N*(N+1)/2
+            total_reward = sum(range(1, N + 1))
+            decay_share = total_reward / N
+            
+            for name in self.model_names:
+                self.w[name] -= decay_share
+                # Opcional: truncar a 0 si no permitimos negativos
+                if not self.allow_negative and self.w[name] < 0:
+                    self.w[name] = 0.0
+            
+            # --- 4) RECOMPENSA: N al mejor, N-1 al segundo, ..., 1 al peor ---
+            rewards = {}
+            for rank, (name, _) in enumerate(ranked):
+                reward = N - rank  # mejor → N puntos, peor → 1 punto
+                self.w[name] += reward
+                rewards[name] = reward
+            
+            # --- 6) Modelo elegido por peso acumulado (AP3) ---
+            chosen_by_weight = max(self.model_names, key=lambda n: self.w[n])
         
         # --- 7) Guardar historial para análisis offline ---
         history_entry = {
@@ -206,14 +355,16 @@ class HyperModel:
             "chosen_by_error": chosen_by_error_simple,
             "chosen_by_weight": chosen_by_weight,
             "choices_differ": chosen_by_error_simple != chosen_by_weight,
-            "decay_share": decay_share,
-            "total_reward": total_reward,
+            "decay_share": decay_share if self.mode != "greedy_weighted" else 0.0,
+            "total_reward": sum(rewards.values()),
         }
         self._history.append(history_entry)
         
         # Marcar modelo elegido para predict()
-        if self.mode == "adaptive":
+        if self.mode == "adaptive" or self.mode == "greedy_adaptive":
             self._last_chosen = chosen_by_weight
+        elif self.mode == "greedy_weighted":
+            self._last_chosen = chosen_by_error_simple
         
         return chosen_by_weight
 
@@ -349,3 +500,32 @@ class HyperModel:
         """AP3: Resetea el historial (para nuevas ejecuciones)"""
         self._history = []
         self._step_count = 0
+    
+    def reset_complete(self):
+        """
+        Resetea completamente el HyperModel para garantizar reproducibilidad:
+        - Pesos a 0
+        - Historial vacío
+        - Contadores a 0
+        - Buffers de modelos base vacíos
+        """
+        # Resetear pesos
+        for name in self.model_names:
+            self.w[name] = 0.0
+        
+        # Limpiar historial y contadores
+        self._history = []
+        self._step_count = 0
+        self._last_preds = {}
+        self._last_chosen = ""
+        self._last_errors = {}
+        self._last_errors_rel = {}
+        self._last_y_true = 0.0
+        
+        # Resetear buffers de modelos base (self.models es una LISTA)
+        for model in self.models:
+            if hasattr(model, 'reset'):
+                model.reset()
+            elif hasattr(model, 'buf'):
+                # Limpiar buffer si existe
+                model.buf = []
