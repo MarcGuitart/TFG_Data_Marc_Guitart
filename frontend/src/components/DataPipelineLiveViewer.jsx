@@ -145,8 +145,6 @@ async function loadBackendSeries() {
     return;
   }
   const data = await res.json();
-  console.log("[loadBackendSeries] Received data:", data);
-  console.log("[loadBackendSeries] Points count:", data.points?.length ?? 0);
   setBackendSeries(data);
 }
 
@@ -379,22 +377,22 @@ const chartData = selectedId
   return (
     <div className="viewer-container">
       <div className="viewer-grid">
-        <Section title="Kafka In" data={kafkaInData}>
+        <Section title="📂 Carga de Datos" data={kafkaInData}>
           <div style={{ marginTop: 8 }}>
             <input type="file" accept=".csv" onChange={handleFileUpload} />
             {uploadError && (
               <div style={{ color: "#f66", marginTop: 6, fontSize: 12 }}>{uploadError}</div>
             )}
             <button onClick={triggerPipeline} className="start-button" disabled={isRunning}>
-              {isRunning ? "Procesando…" : "🚀 Ejecutar agente"}
+              {isRunning ? "Procesando…" : "🚀 Ejecutar Pipeline"}
             </button>
           </div>
         </Section>
 
         <div className="section">
-          <h2>Uploaded Data</h2>
+          <h2>📊 Serie Cargada</h2>
           {rows.length === 0 ? (
-            <p>No data uploaded yet.</p>
+            <p>Sin datos. Sube un CSV para comenzar.</p>
           ) : (
             <>
               {ids.length > 0 && (
@@ -643,11 +641,15 @@ const chartData = selectedId
                 </>
               )}
 
-              <pre className="scrollable" style={{ marginTop: 12 }}>
-                {chartData.slice(0, 10).map((row, i) => (
-                  <div key={i}>{JSON.stringify(row, null, 2)}</div>
-                ))}
-              </pre>
+              {/* Debug JSON - Oculto por defecto en producción */}
+              {false && (
+                <pre className="scrollable" style={{ marginTop: 12 }}>
+                  {chartData.slice(0, 10).map((row, i) => (
+                    <div key={i}>{JSON.stringify(row, null, 2)}</div>
+                  ))}
+                </pre>
+              )}
+              
               <MetricsPanel
                 combined={metricsCombined}
                 models={metricsModels}
