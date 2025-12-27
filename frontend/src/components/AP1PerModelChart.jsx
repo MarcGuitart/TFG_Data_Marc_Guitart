@@ -112,8 +112,8 @@ export default function AP1PerModelChart({ data = [], startIdx = 0, windowSize =
 
   return (
     <div style={{ width: "100%", marginBottom: 20 }}>
-      <h3>AP1: Zoom de modelos adaptativos (~{windowSize} puntos)</h3>
-      <p style={{ fontSize: 12, color: "#666" }}>
+      <h3>Zoom de modelos adaptativos (~{windowSize} puntos)</h3>
+      <p style={{ fontSize: 12, color: "#ffffffff" }}>
         Observa cómo el modelo adaptativo (naranja gruesa) salta entre modelos base (colores claros)
       </p>
 
@@ -128,7 +128,7 @@ export default function AP1PerModelChart({ data = [], startIdx = 0, windowSize =
           style={{ flex: 1 }}
         />
         <button onClick={handleZoomNext} style={{ padding: "5px 10px" }}>Siguiente →</button>
-        <span style={{ fontSize: 12, color: "#666" }}>
+        <span style={{ fontSize: 12, color: "#ffffffff" }}>
           Puntos {localStartIdx + 1}–{Math.min(localStartIdx + windowSize, data.length)} de {data.length}
         </span>
       </div>
@@ -141,9 +141,11 @@ export default function AP1PerModelChart({ data = [], startIdx = 0, windowSize =
               dataKey="x"
               tickFormatter={(v) => (v ? new Date(v).toLocaleTimeString() : "")}
               minTickGap={20}
+              tick={{ fill: "#ffffff" }}
+              stroke="#ffffff"
               interval="preserveStartEnd"
             />
-            <YAxis allowDataOverflow width={50} />
+            <YAxis allowDataOverflow width={50} tick={{ fill: "#ffffff" }} stroke="#ffffff" />
             <Tooltip
               labelFormatter={(v) => fmt(v)}
               formatter={(value, name) => {

@@ -18,7 +18,7 @@ const MODEL_COLORS = {
   linear: "#3b82f6",
   poly: "#10b981",
   alphabeta: "#f59e0b",
-  kalman: "#8b5cf6",
+  kalman: "#6743bbff",
 };
 
 /**
@@ -66,10 +66,8 @@ export default function AP1GlobalChart({ data = [] }) {
 
   return (
     <div style={{ width: "100%", marginBottom: 20 }}>
-      <h3>AP1: Vista global de la serie completa</h3>
-      <p style={{ fontSize: 12, color: "#666" }}>
-        Línea azul: valor real observado. Línea naranja (gruesa): predicción del modelo adaptativo.
-        Líneas finas: predicciones individuales de cada modelo (Linear, Poly, Alpha-Beta, Kalman).
+      <h3>Global View of the Complete Series</h3>
+      <p style={{ fontSize: 12, color: "#ffffffff" }}>
       </p>
 
       <div style={{ width: "100%", height: 350 }}>
@@ -80,9 +78,11 @@ export default function AP1GlobalChart({ data = [] }) {
               dataKey="x"
               tickFormatter={(v) => (v ? new Date(v).toLocaleTimeString() : "")}
               minTickGap={60}
+              tick={{ fill: "#ffffff" }}
+              stroke="#ffffff"
               interval="preserveStartEnd"
             />
-            <YAxis allowDataOverflow width={50} />
+            <YAxis allowDataOverflow width={50} tick={{ fill: "#ffffff" }} stroke="#ffffff" />
             <Tooltip
               labelFormatter={(v) => fmt(v)}
               formatter={(value) => {

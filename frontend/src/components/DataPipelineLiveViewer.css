@@ -41,7 +41,7 @@ h1, h2 {
   background-color: var(--section-bg);
   padding: 1rem;
   border-radius: 12px;
-  box-shadow: 0 0 12px rgba(0, 170, 255, 0.1);
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.1);
   border: 1px solid var(--border-color);
   overflow-y: auto;
   flex-shrink: 0;
@@ -82,7 +82,7 @@ input[type="file"] {
   padding: 6px;
   border: 1px solid var(--border-color);
   border-radius: 4px;
-  background-color: #2a2a2a;
+  background-color: #ffffff;
   color: var(--text-color);
   cursor: pointer;
   font-size: 12px;
@@ -106,7 +106,7 @@ input[type="file"] {
 }
 
 .start-button:disabled {
-  background-color: #666;
+  background-color: #ffffff;
   cursor: not-allowed;
 }
 

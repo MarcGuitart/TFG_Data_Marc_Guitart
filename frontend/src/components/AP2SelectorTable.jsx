@@ -92,7 +92,7 @@ export default function AP2SelectorTable({ data = [], onRowHover, maxRows = 1000
   if (!processedData.length) {
     return (
       <div style={{ width: "100%", marginTop: 20 }}>
-        <h3>AP2: Tabla del Selector Adaptativo</h3>
+        <h3>Tabla del Selector Adaptativo</h3>
         <p style={{ color: "#ccc" }}>(no hay datos)</p>
       </div>
     );
@@ -100,8 +100,8 @@ export default function AP2SelectorTable({ data = [], onRowHover, maxRows = 1000
 
   return (
     <div style={{ width: "100%", marginTop: 20, marginBottom: 20 }}>
-      <h3>AP2: Tabla del Selector Adaptativo</h3>
-      <p style={{ fontSize: 12, color: "#666", marginBottom: 10 }}>
+      <h3>Tabla del Selector Adaptativo</h3>
+      <p style={{ fontSize: 12, color: "#ffffffff", marginBottom: 10 }}>
         Cada fila muestra el modelo elegido, su error puntual (en % y valor absoluto) para cada timestamp.
       </p>
 

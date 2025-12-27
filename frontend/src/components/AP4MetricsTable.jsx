@@ -51,7 +51,7 @@ export default function AP4MetricsTable({ data = [] }) {
   return (
     <div style={{ width: "100%", marginTop: 20, marginBottom: 20 }}>
       <h3>AP4: Ranking de Modelos (Top-3)</h3>
-      <p style={{ fontSize: 12, color: "#666", marginBottom: 10 }}>
+      <p style={{ fontSize: 12, color: "#ffffffff", marginBottom: 10 }}>
         Ordenado por peso final acumulado (weight_final). Métricas globales: MAE, RMSE, MAPE, Error relativo medio (%).
       </p>
 
