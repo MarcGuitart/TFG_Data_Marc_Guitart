@@ -169,7 +169,7 @@ const PredictionPanel = forwardRef((props, ref) => {
   }, [currentId, refreshKey, viewMode]);
 
   const info = useMemo(() => {
-    if (!points.length) return { nObs: 0, nPred: 0, nModels: 0 };
+    if (!points.length) return { nObs: 0, nPred: 0, nModels: 0, confidence: 0 };
     const nObs = points.filter(r => typeof r.var === "number").length;
     const nPred = points.filter(r => typeof r.prediction === "number").length;
     const modelKeys = new Set();
@@ -180,7 +180,19 @@ const PredictionPanel = forwardRef((props, ref) => {
         }
       });
     }
-    return { nObs, nPred, nModels: modelKeys.size, models: [...modelKeys] };
+    
+    // Calcular confianza general: (1 - Error_Rel_Mean)%
+    const errorsRel = points
+      .map(p => p.chosen_error_rel || p.error_rel)
+      .filter(e => typeof e === "number" && !isNaN(e) && isFinite(e));
+    
+    let confidence = 0;
+    if (errorsRel.length > 0) {
+      const meanErrorRel = errorsRel.reduce((a, b) => a + Math.abs(b), 0) / errorsRel.length;
+      confidence = Math.max(0, Math.min(100, 100 - meanErrorRel));
+    }
+    
+    return { nObs, nPred, nModels: modelKeys.size, models: [...modelKeys], confidence };
   }, [points]);
 
   const tabButtons = [
@@ -324,6 +336,33 @@ const PredictionPanel = forwardRef((props, ref) => {
                 <div style={{ background: "#1a1a1a", padding: 16, borderRadius: 6, border: "1px solid #333" }}>
                   <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>Modelos Activos</div>
                   <div style={{ fontSize: 24, fontWeight: "bold", color: "#a78bfa" }}>{info.nModels}</div>
+                </div>
+                <div style={{ 
+                  background: "linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%)", 
+                  padding: 16, 
+                  borderRadius: 6, 
+                  border: `2px solid ${info.confidence >= 85 ? "#10b981" : info.confidence >= 75 ? "#f59e0b" : "#ef4444"}`,
+                  gridColumn: "span 2"
+                }}>
+                  <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>
+                    Overall Confidence Score
+                    <span style={{ marginLeft: 8, fontSize: 9, opacity: 0.6 }}>
+                      (1 - Error Relativo Medio)
+                    </span>
+                  </div>
+                  <div style={{ 
+                    fontSize: 32, 
+                    fontWeight: "bold", 
+                    color: info.confidence >= 85 ? "#10b981" : info.confidence >= 75 ? "#f59e0b" : "#ef4444",
+                    fontFamily: "monospace"
+                  }}>
+                    {info.confidence.toFixed(2)}%
+                  </div>
+                  <div style={{ fontSize: 10, opacity: 0.6, marginTop: 4 }}>
+                    {info.confidence >= 85 ? "🎯 Excelente precisión" : 
+                     info.confidence >= 75 ? "⚠️ Precisión aceptable" : 
+                     "❌ Precisión baja"}
+                  </div>
                 </div>
               </div>
 
