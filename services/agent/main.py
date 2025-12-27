@@ -15,18 +15,34 @@ def now_utc():
 
 def shift_ts_to_today(ts_str: str | None) -> datetime:
     """
-    Parsea 'YYYY-mm-dd HH:MM:SS' o ISO.
-    Mantiene H/M/S del CSV pero pone la FECHA de HOY (UTC).
+    Mantiene la fecha y hora del CSV pero las traslada al pasado reciente.
+    Calcula cuántos días atrás estaba el timestamp original y lo traslada
+    manteniendo esa distancia relativa, pero dentro de la ventana de retention.
     """
     base = now_utc()
     if not ts_str:
         return base
+    
     s = str(ts_str).replace("T", " ").replace("Z", "")
     try:
-        t = datetime.strptime(s[:19], "%Y-%m-%d %H:%M:%S").time()
+        original_dt = datetime.strptime(s[:19], "%Y-%m-%d %H:%M:%S")
     except Exception:
         return base
-    return datetime.combine(base.date(), t).replace(tzinfo=timezone.utc)
+    
+    # Referencia: usamos una fecha base del CSV (primera fecha que aparezca)
+    reference_date = datetime(2025, 3, 10)  # Primera fecha del CSV típico
+    
+    # Calculamos cuántos segundos han pasado desde la referencia
+    delta_seconds = (original_dt - reference_date).total_seconds()
+    
+    # Creamos un timestamp 7 días atrás desde ahora y sumamos el delta
+    # Esto asegura que incluso el último punto del CSV esté en el pasado
+    base_past = base - timedelta(days=7)  # 7 días atrás (dentro de retention)
+    
+    # Sumamos el delta desde la referencia
+    result_dt = base_past + timedelta(seconds=delta_seconds)
+    
+    return result_dt
 
 def parse_ts_keep_date(ts_str):
     """Parsea 'YYYY-mm-dd HH:MM:SS' o ISO y conserva fecha y hora; salida UTC."""
@@ -297,11 +313,19 @@ def write_timeseries(rec):
             model.update_buffer(float(rec["var"]))  # legacy buffer (no interfiere)
         except Exception:
             pass
-    write_api.write(bucket=INFLUX_BUCKET, record=p)
+    try:
+        write_api.write(bucket=INFLUX_BUCKET, record=p)
+        log.info("✅ Escrito telemetry.var: unit=%s ts=%s", unit, ts)
+    except Exception as e:
+        log.error("❌ Error escribiendo telemetry.var: %s", e)
 
 def write_prediction(unit: str, when: datetime, yhat: float):
     p = Point("telemetry").tag("id", unit).field("prediction", float(yhat)).time(when, WritePrecision.S)
-    write_api.write(bucket=INFLUX_BUCKET, record=p)
+    try:
+        write_api.write(bucket=INFLUX_BUCKET, record=p)
+        log.info("✅ Escrito telemetry.prediction: unit=%s ts=%s", unit, when)
+    except Exception as e:
+        log.error("❌ Error escribiendo telemetry.prediction: %s", e)
 
 # === TRAINER (legacy, compatible con tag id) ===
 def query_training_rows(unit: str, lookback_days: int = LEARN_LOOKBACK_DAYS):
@@ -440,6 +464,7 @@ def main():
             enriched = dict(rec)
             enriched["yhat"] = float(y_hat)                  # COMPAT: collector la escribe en 'prediction'
             enriched["ts_pred"] = ts_pred.strftime("%Y-%m-%d %H:%M:%S")
+            enriched["ts_influx"] = base_ts.strftime("%Y-%m-%d %H:%M:%S")  # Timestamp que usamos para InfluxDB
             enriched["mode"] = FLAVOR
             if "timestamp" in enriched and "ts" not in enriched:
                 enriched["ts"] = enriched["timestamp"]
