@@ -87,14 +87,16 @@ export default function CsvChart({ data = [], zoomRange = null }) {
     <div style={{ width: "100%", height: 320 }}>
       <ResponsiveContainer>
         <ComposedChart data={norm} margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" opacity={0.25} />
+          <Grid strokeDasharray="3 3" opacity={0.25} />
           <XAxis
             dataKey="x"
             tickFormatter={(v) => (v ? new Date(v).toLocaleTimeString() : "")}
             minTickGap={40}
+            tick={{ fill: "#ffffff" }}
+            stroke="#ffffff"
             interval="preserveStartEnd"
           />
-          <YAxis allowDataOverflow width={50} />
+          <YAxis allowDataOverflow width={50} tick={{ fill: "#ffffff" }} stroke="#ffffff" />
           <Tooltip
             labelFormatter={(v) => fmt(v)}
             formatter={(value, name, props) => {

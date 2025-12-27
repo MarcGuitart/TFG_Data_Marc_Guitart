@@ -252,15 +252,15 @@ export default function AP3WeightsPanel({ selectedId }) {
               <h4 style={{ margin: "0 0 8px 0", fontSize: 14 }}>Evolución de Pesos por Modelo</h4>
               <ResponsiveContainer width="100%" height={300}>
                 <LineChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#444" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#ffffffff" />
                   <XAxis 
                     dataKey="step" 
-                    stroke="#888"
-                    tick={{ fontSize: 10 }}
+                    stroke="#ffffff"
+                    tick={{ fontSize: 10, fill: "#ffffff" }}
                   />
                   <YAxis 
-                    stroke="#888"
-                    tick={{ fontSize: 10 }}
+                    stroke="#ffffff"
+                    tick={{ fontSize: 10, fill: "#ffffff" }}
                   />
                   <Tooltip 
                     contentStyle={{ background: "#1a1a1a", border: "1px solid #444" }}
@@ -270,7 +270,7 @@ export default function AP3WeightsPanel({ selectedId }) {
                     ]}
                   />
                   <Legend />
-                  <ReferenceLine y={0} stroke="#666" strokeDasharray="3 3" />
+                  <ReferenceLine y={0} stroke="#ffffffff" strokeDasharray="3 3" />
                   
                   {modelNames.map(m => (
                     <Line
@@ -286,7 +286,7 @@ export default function AP3WeightsPanel({ selectedId }) {
                 </LineChart>
               </ResponsiveContainer>
               
-              <p style={{ fontSize: 10, color: "#666", marginTop: 4 }}>
+              <p style={{ fontSize: 10, color: "#ffffffff", marginTop: 4 }}>
                 Los pesos muestran el "historial acumulado" de cada modelo. 
                 Modelo con mayor peso = mejor rendimiento histórico.
               </p>
@@ -450,7 +450,7 @@ export default function AP3WeightsPanel({ selectedId }) {
                 </tbody>
               </table>
               
-              <p style={{ fontSize: 10, color: "#666", marginTop: 8 }}>
+              <p style={{ fontSize: 10, color: "#ffffffff", marginTop: 8 }}>
                 💡 El modelo con mayor peso final es el que ha demostrado mejor rendimiento 
                 histórico según el sistema de ranking AP3.
               </p>

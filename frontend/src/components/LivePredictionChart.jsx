@@ -257,11 +257,11 @@ export default function LivePredictionChart({ selectedId, isRunning }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
               <XAxis
                 dataKey="index"
-                stroke="#6b7280"
-                tick={{ fontSize: 12 }}
+                stroke="#ffffff"
+                tick={{ fontSize: 12, fill: "#ffffff" }}
                 interval={Math.floor(displayData.length / 10)}
               />
-              <YAxis stroke="#6b7280" tick={{ fontSize: 12 }} />
+              <YAxis stroke="#ffffff" tick={{ fontSize: 12, fill: "#ffffff" }} />
               <Tooltip
                 contentStyle={{
                   backgroundColor: "#ffffff",

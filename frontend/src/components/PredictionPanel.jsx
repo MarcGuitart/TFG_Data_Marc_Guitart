@@ -184,19 +184,19 @@ const PredictionPanel = forwardRef((props, ref) => {
   }, [points]);
 
   const tabButtons = [
-    { id: TABS.DEMO, label: "🎯 Demo Principal", icon: "presentation" },
-    { id: TABS.GLOBAL_STATS, label: "🌐 Vista Global Completa", icon: "analytics" },
-    { id: TABS.AP2_SELECTOR, label: "📋 Tabla Selector (AP2)", icon: "list" },
-    { id: TABS.AP4_METRICS, label: "🏆 Ranking Modelos (AP4)", icon: "medal" },
-    { id: TABS.AP1_GLOBAL, label: "📊 Vista Gráfica (AP1)", icon: "globe" },
-    { id: TABS.AP1_ZOOM, label: "🔍 Zoom Detalle", icon: "zoom", hidden: true },
-    { id: TABS.VERIFY, label: "✓ Verificación", icon: "check", hidden: true },
+    { id: TABS.DEMO, label: "🎯 Demo", icon: "presentation" },
+    { id: TABS.GLOBAL_STATS, label: "🌐 Complete Global View", icon: "analytics" },
+    { id: TABS.AP2_SELECTOR, label: "📋 Table Selector", icon: "list" },
+    { id: TABS.AP4_METRICS, label: "🏆 Ranking Models", icon: "medal" },
+    { id: TABS.AP1_GLOBAL, label: "📊 Global View", icon: "globe" },
+    { id: TABS.AP1_ZOOM, label: "🔍 Zoom Detail", icon: "zoom", hidden: true },
+    { id: TABS.VERIFY, label: "✓ Verification", icon: "check", hidden: true },
   ];
 
   return (
     <div style={{ color: "white", padding: "16px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <h2 style={{ margin: 0 }}>🧠 HyperModel: Sistema de Predicción Adaptativa</h2>
+        <h2 style={{ margin: 0 }}> Sistema de Predicción Adaptativa</h2>
       </div>
 
       <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 12, padding: "8px", backgroundColor: "#222", borderRadius: 4, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -206,9 +206,9 @@ const PredictionPanel = forwardRef((props, ref) => {
           <strong>Observaciones:</strong> {info.nObs}
           {" · "}
           <strong>Predicciones:</strong> {info.nPred}
-          {info.nModels > 0 && (
+          {/* {info.nModels > 0 && (
             <> · <strong>Modelos activos:</strong> {info.models?.join(", ")}</>
-          )}
+          )} */}
         </div>
         
         {/* Toggle Vista Demo / Completa */}
@@ -220,14 +220,14 @@ const PredictionPanel = forwardRef((props, ref) => {
               padding: "4px 10px",
               fontSize: 11,
               background: viewMode === "demo" ? "#FF7A00" : "#444",
-              border: "1px solid #666",
+              border: "1px solid #ffffffff",
               borderRadius: 3,
               color: "#fff",
               cursor: "pointer",
               fontWeight: viewMode === "demo" ? "bold" : "normal",
             }}
           >
-            📊 Demo (últimas 24h)
+            Demo (últimas 24h)
           </button>
           <button
             onClick={() => setViewMode("full")}
@@ -235,14 +235,14 @@ const PredictionPanel = forwardRef((props, ref) => {
               padding: "4px 10px",
               fontSize: 11,
               background: viewMode === "full" ? "#FF7A00" : "#444",
-              border: "1px solid #666",
+              border: "1px solid #ffffffff",
               borderRadius: 3,
               color: "#fff",
               cursor: "pointer",
               fontWeight: viewMode === "full" ? "bold" : "normal",
             }}
           >
-            🌐 Completa (todos los datos)
+            Completa (todos los datos)
           </button>
         </div>
       </div>
@@ -285,18 +285,18 @@ const PredictionPanel = forwardRef((props, ref) => {
           {activeTab === TABS.DEMO && (
             <div>
               <div style={{ marginBottom: 24 }}>
-                <h3 style={{ fontSize: 16, marginBottom: 12 }}>📈 Serie Real vs Predicción Adaptativa</h3>
+                <h3 style={{ fontSize: 16, marginBottom: 12 }}></h3>
                 <AP1GlobalChart data={points} />
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 24 }}>
                 <div>
-                  <h3 style={{ fontSize: 16, marginBottom: 12 }}>📋 Decisiones del Selector (AP2)</h3>
+                  <h3 style={{ fontSize: 16, marginBottom: 12 }}>Decisiones del Selector (AP2)</h3>
                   <AP2SelectorTable data={selectorData} maxRows={10} />
                 </div>
 
                 <div>
-                  <h3 style={{ fontSize: 16, marginBottom: 12 }}>🏆 Ranking de Modelos (AP4)</h3>
+                  <h3 style={{ fontSize: 16, marginBottom: 12 }}>Ranking de Modelos (AP4)</h3>
                   <AP4MetricsTable data={metricsData} />
                 </div>
               </div>
@@ -305,7 +305,7 @@ const PredictionPanel = forwardRef((props, ref) => {
 
           {activeTab === TABS.GLOBAL_STATS && (
             <div>
-              <h3 style={{ fontSize: 18, marginBottom: 16 }}>🌐 Análisis Global Completo - Todos los Datos</h3>
+              <h3 style={{ fontSize: 18, marginBottom: 16 }}>Análisis Global Completo - Todos los Datos</h3>
               
               {/* Estadísticas generales */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginBottom: 24 }}>
@@ -330,7 +330,7 @@ const PredictionPanel = forwardRef((props, ref) => {
               {/* Distribución de modelos elegidos */}
               <div style={{ background: "#1a1a1a", padding: 16, borderRadius: 6, border: "1px solid #333", marginBottom: 24 }}>
                 <h4 style={{ fontSize: 14, marginBottom: 12, color: "#FF7A00" }}>
-                  📊 Distribución de Modelos Elegidos (chosen_model)
+                  Distribución de Modelos Elegidos (chosen_model)
                 </h4>
                 {(() => {
                   const modelCounts = {};
@@ -395,8 +395,8 @@ const PredictionPanel = forwardRef((props, ref) => {
 
               {/* Métricas de rendimiento */}
               <div>
-                <h4 style={{ fontSize: 14, marginBottom: 12, color: "#FF7A00" }}>
-                  🏆 Ranking Final de Modelos
+                <h4 style={{ fontSize: 20, marginBottom: 12, color: "#ffffffff" }}>
+                  Ranking Final de Modelos:
                 </h4>
                 <AP4MetricsTable data={metricsData} />
               </div>
