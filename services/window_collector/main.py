@@ -5,7 +5,7 @@ from fastapi import FastAPI
 import uvicorn
 from influxdb_client import InfluxDBClient, Point, WritePrecision
 from influxdb_client.client.write_api import SYNCHRONOUS
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 # === ENV VARS ===
 BROKER = os.getenv("KAFKA_BROKER", "kafka:9092")
@@ -38,10 +38,10 @@ def wait_for_kafka(broker="kafka:9092", timeout=120):
     while time.time() - t0 < timeout:
         try:
             with socket.create_connection((host, port), timeout=3):
-                print(f"[collector] ✅ Kafka OK en {broker}")
+                print(f"[collector] ✅ Kafka OK en {broker}", flush=True)
                 return
         except Exception as e:
-            print(f"[collector] esperando Kafka {broker} ... {e}")
+            print(f"[collector] esperando Kafka {broker} ... {e}", flush=True)
             time.sleep(2)
     raise RuntimeError(f"[collector] ❌ Kafka no disponible en {broker}")
 
@@ -59,16 +59,37 @@ def _parse_ts(ts_any):
         return None
 
 def _shift_ts_to_today(ts_str):
-    """Mantiene H/M/S del mensaje y mueve la FECHA a hoy (UTC)."""
+    """
+    Mantiene la fecha y hora del CSV pero las traslada al pasado reciente.
+    Calcula cuántos días atrás estaba el timestamp original y lo traslada
+    manteniendo esa distancia relativa, pero dentro de la ventana de retention.
+    """
     if not ts_str:
         return datetime.utcnow().replace(tzinfo=timezone.utc)
+    
     s = str(ts_str).replace("T", " ").replace("Z", "")
     try:
-        t = datetime.strptime(s[:19], "%Y-%m-%d %H:%M:%S").time()
+        original_dt = datetime.strptime(s[:19], "%Y-%m-%d %H:%M:%S")
     except Exception:
         return datetime.utcnow().replace(tzinfo=timezone.utc)
-    today = datetime.utcnow().date()
-    return datetime.combine(today, t).replace(tzinfo=timezone.utc)
+    
+    # Referencia: usamos una fecha base del CSV (primera fecha que aparezca)
+    # Para simplicidad, asumimos que queremos trasladar todo a los últimos 6 días
+    # Calculamos la diferencia desde una fecha base arbitraria (ej: 2025-03-10)
+    reference_date = datetime(2025, 3, 10)  # Primera fecha del CSV típico
+    
+    # Calculamos cuántos segundos han pasado desde la referencia
+    delta_seconds = (original_dt - reference_date).total_seconds()
+    
+    # Creamos un timestamp 7 días atrás desde ahora y sumamos el delta
+    # Esto asegura que incluso el último punto del CSV esté en el pasado
+    now = datetime.utcnow().replace(tzinfo=timezone.utc)
+    base_past = now - timedelta(days=7)  # 7 días atrás (dentro de retention)
+    
+    # Sumamos el delta desde la referencia
+    result_dt = base_past + timedelta(seconds=delta_seconds)
+    
+    return result_dt
 
 def _key_tuple(rec: dict):
     # Construye la clave de dedupe con los campos configurados; si faltan, usa None
@@ -97,41 +118,46 @@ def write_to_influx(rec):
         except Exception as e:
             print(f"[collector] ❌ Error guardando telemetry_models: {e}")
 
-    # Observado…
-    if "var" in rec:
-        try:
-            p = (
-                Point("telemetry")
-                .tag("id", unit) 
-                .field("var", float(rec["var"]))
-                .time(_shift_ts_to_today(rec.get("timestamp")), WritePrecision.S)
-            )
-            _write_api.write(bucket=INFLUX_BUCKET, record=p)
-        except Exception as e:
-            print(f"[collector] ❌ Error guardando observed: {e}")
+    # Observado… (DESACTIVADO - el agent ya lo escribe)
+    # if "var" in rec:
+    #     try:
+    #         ts_var = _shift_ts_to_today(rec.get("timestamp"))
+    #         p = (
+    #             Point("telemetry")
+    #             .tag("id", unit) 
+    #             .field("var", float(rec["var"]))
+    #             .time(ts_var, WritePrecision.S)
+    #         )
+    #         _write_api.write(bucket=INFLUX_BUCKET, record=p)
+    #     except Exception as e:
+    #         print(f"[collector] ❌ Error guardando observed: {e}")
 
-    # ✅ Predicción en ts_pred (sin inventarnos funciones)
-    if "yhat" in rec:
-        ts_pred_str = rec.get("ts_pred")  # "YYYY-mm-dd HH:MM:SS"
-        if ts_pred_str:
-            when = _parse_ts(ts_pred_str)  # NO uses timestamp aquí
-            try:
-                p = (
-                    Point("telemetry")
-                    .tag("id", unit)
-                    .field("prediction", float(rec["yhat"]))
-                    .time(when, WritePrecision.S)
-                )
-                _write_api.write(bucket=INFLUX_BUCKET, record=p)
-            except Exception as e:
-                print(f"[collector] ❌ Error guardando prediction: {e}")
+    # ✅ Predicción en ts_pred (DESACTIVADO - el agent ya lo escribe)
+    # if "yhat" in rec:
+    #     ts_pred_str = rec.get("ts_pred")  # "YYYY-mm-dd HH:MM:SS"
+    #     if ts_pred_str:
+    #         when = _shift_ts_to_today(ts_pred_str)
+    #         try:
+    #             p = (
+    #                 Point("telemetry")
+    #                 .tag("id", unit)
+    #                 .field("prediction", float(rec["yhat"]))
+    #                 .time(when, WritePrecision.S)
+    #             )
+    #             _write_api.write(bucket=INFLUX_BUCKET, record=p)
+    #         except Exception as e:
+    #             print(f"[collector] ❌ Error guardando prediction: {e}")
         # si no hay ts_pred, no escribas prediction desde el collector
 
     # Pesos (opcional)
     weights = rec.get("hyper_weights")
     if isinstance(weights, dict):
         try:
-            tsw = _parse_ts(rec.get("ts_pred")) or _shift_ts_to_today(rec.get("timestamp"))
+            # USAR el timestamp exacto que el agent usó para escribir a InfluxDB
+            tsw = _parse_ts(rec.get("ts_influx"))
+            if not tsw:
+                # Fallback a ts_pred o timestamp shifteado
+                tsw = _parse_ts(rec.get("ts_pred")) or _shift_ts_to_today(rec.get("timestamp"))
             for model_name, w in weights.items():
                 _write_api.write(
                     bucket=INFLUX_BUCKET,
@@ -150,7 +176,11 @@ def write_to_influx(rec):
     chosen_model = rec.get("hyper_chosen")
     if chosen_model:
         try:
-            tsc = _parse_ts(rec.get("ts_pred")) or _shift_ts_to_today(rec.get("timestamp"))
+            # USAR el timestamp exacto que el agent usó para escribir a InfluxDB
+            tsc = _parse_ts(rec.get("ts_influx"))
+            if not tsc:
+                # Fallback: intentar parsear timestamp original y shiftearlo
+                tsc = _parse_ts(rec.get("timestamp")) or _shift_ts_to_today(rec.get("timestamp"))
             _write_api.write(
                 bucket=INFLUX_BUCKET,
                 record=(
@@ -160,15 +190,20 @@ def write_to_influx(rec):
                     .time(tsc, WritePrecision.S)
                 ),
             )
+            print(f"[collector] ✅ Escrito chosen_model: {unit} @ {tsc.isoformat()} = {chosen_model}", flush=True)
         except Exception as e:
-            print(f"[collector] ❌ Error guardando chosen_model: {e}")
+            print(f"[collector] ❌ Error guardando chosen_model: {e}", flush=True)
 
     # AP2: Error del modelo elegido (absoluto y relativo)
     chosen_error_abs = rec.get("chosen_error_abs")
     chosen_error_rel = rec.get("chosen_error_rel")
     if chosen_error_abs is not None or chosen_error_rel is not None:
         try:
-            tse = _parse_ts(rec.get("ts_pred")) or _shift_ts_to_today(rec.get("timestamp"))
+            # USAR el timestamp exacto que el agent usó para escribir a InfluxDB
+            tse = _parse_ts(rec.get("ts_influx"))
+            if not tse:
+                # Fallback: intentar parsear timestamp original y shiftearlo
+                tse = _parse_ts(rec.get("timestamp")) or _shift_ts_to_today(rec.get("timestamp"))
             p = Point("chosen_error").tag("id", unit)
             if chosen_error_abs is not None:
                 p = p.field("error_abs", float(chosen_error_abs))
@@ -176,8 +211,9 @@ def write_to_influx(rec):
                 p = p.field("error_rel", float(chosen_error_rel))
             p = p.time(tse, WritePrecision.S)
             _write_api.write(bucket=INFLUX_BUCKET, record=p)
+            print(f"[collector] ✅ Escrito chosen_error: {unit} @ {tse.isoformat()}", flush=True)
         except Exception as e:
-            print(f"[collector] ❌ Error guardando chosen_error: {e}")
+            print(f"[collector] ❌ Error guardando chosen_error: {e}", flush=True)
 
     # AP2: Errores por modelo (relativos) para análisis detallado
     errors_rel = rec.get("hyper_errors_rel")
@@ -257,17 +293,19 @@ def write_to_influx(rec):
 
 
 def run_consumer():
+    print("[collector] 🚀 Iniciando run_consumer()...")
     while True:
         try:
+            print("[collector] ⏳ Esperando Kafka...")
             wait_for_kafka(BROKER, timeout=300)
             consumer = KafkaConsumer(
                 TOUT,
                 bootstrap_servers=BROKER,
-                auto_offset_reset="earliest",
-                enable_auto_commit=False,
-                group_id="collector-v5"
+                auto_offset_reset="earliest",  # Leer todos los mensajes desde el principio
+                enable_auto_commit=True,       # Habilitar auto-commit para guardar progreso
+                group_id="collector-v7"        # Nuevo group_id para resetear offset
             )
-            print(f"[collector] ✅ Suscrito a {TOUT}, esperando mensajes...")
+            print(f"[collector] ✅ Suscrito a {TOUT}, esperando mensajes...", flush=True)
 
             producer = KafkaProducer(
                 bootstrap_servers=BROKER,
@@ -305,7 +343,7 @@ def run_consumer():
 
 @app.on_event("startup")
 def start_bg():
-    threading.Thread(target=run_consumer, daemon=True).start()
+    pass  # Deshabilitado - el thread se inicia en __main__
 
 @app.get("/health")
 def health():
@@ -346,4 +384,11 @@ def flush():
     return {"rows": len(df), "path": out_path}
 
 if __name__ == "__main__":
+    import sys
+    sys.stdout.flush()
+    print("[collector] 🚀 Iniciando aplicación...", flush=True)
+    print("[collector] 🔧 Iniciando thread de run_consumer()...", flush=True)
+    threading.Thread(target=run_consumer, daemon=True).start()
+    print("[collector] ✅ Thread iniciado, arrancando servidor HTTP...", flush=True)
     uvicorn.run(app, host="0.0.0.0", port=8082)
+
