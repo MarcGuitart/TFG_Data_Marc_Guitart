@@ -61,6 +61,22 @@ const ConfidenceEvolutionChart = ({ data }) => {
       }
     });
 
+    // Apply smoothing to cumulative accuracy using a 5-point moving average
+    // This reduces visual abruptness when single points have very low accuracy
+    const smoothingWindow = Math.min(5, Math.ceil(processed.length / 10));
+    if (processed.length > 1 && smoothingWindow > 1) {
+      for (let i = 0; i < processed.length; i++) {
+        const start = Math.max(0, i - Math.floor(smoothingWindow / 2));
+        const end = Math.min(processed.length, i + Math.floor(smoothingWindow / 2) + 1);
+        const window = processed.slice(start, end);
+        const smoothedAccuracy = window.reduce((sum, p) => sum + p.cumulativeAccuracy, 0) / window.length;
+        processed[i].cumulativeAccuracySmoothed = parseFloat(smoothedAccuracy.toFixed(2));
+      }
+    } else {
+      // If not enough data points for smoothing, use original values
+      processed.forEach(p => p.cumulativeAccuracySmoothed = p.cumulativeAccuracy);
+    }
+
     return processed;
   }, [data]);
 
@@ -71,19 +87,19 @@ const ConfidenceEvolutionChart = ({ data }) => {
     const firstHalf = processedData.slice(0, Math.floor(processedData.length / 2));
     const secondHalf = processedData.slice(Math.floor(processedData.length / 2));
 
-    const avgFirst = firstHalf.reduce((sum, p) => sum + p.cumulativeAccuracy, 0) / firstHalf.length;
-    const avgSecond = secondHalf.reduce((sum, p) => sum + p.cumulativeAccuracy, 0) / secondHalf.length;
+    const avgFirst = firstHalf.reduce((sum, p) => sum + p.cumulativeAccuracySmoothed, 0) / firstHalf.length;
+    const avgSecond = secondHalf.reduce((sum, p) => sum + p.cumulativeAccuracySmoothed, 0) / secondHalf.length;
     const trend = avgSecond - avgFirst;
 
     const final = processedData[processedData.length - 1];
     const initial = processedData[0];
 
     return {
-      initial: initial.cumulativeAccuracy,
-      final: final.cumulativeAccuracy,
+      initial: initial.cumulativeAccuracySmoothed,
+      final: final.cumulativeAccuracySmoothed,
       trend: trend,
-      improvement: final.cumulativeAccuracy - initial.cumulativeAccuracy,
-      avgAccuracy: processedData.reduce((sum, p) => sum + p.cumulativeAccuracy, 0) / processedData.length,
+      improvement: final.cumulativeAccuracySmoothed - initial.cumulativeAccuracySmoothed,
+      avgAccuracy: processedData.reduce((sum, p) => sum + p.cumulativeAccuracySmoothed, 0) / processedData.length,
     };
   }, [processedData]);
 
@@ -108,6 +124,9 @@ const ConfidenceEvolutionChart = ({ data }) => {
           </div>
           <div style={{ color: "#10b981", marginBottom: 4 }}>
             <strong>Cumulative Accuracy:</strong> {data.cumulativeAccuracy}%
+          </div>
+          <div style={{ color: "#8b5cf6", marginBottom: 0, fontSize: 11, opacity: 0.8 }}>
+            <strong>Smoothed Accuracy:</strong> {data.cumulativeAccuracySmoothed}%
           </div>
         </div>
       );
@@ -292,11 +311,11 @@ const ConfidenceEvolutionChart = ({ data }) => {
             />
             <Line
               type="monotone"
-              dataKey="cumulativeAccuracy"
+              dataKey="cumulativeAccuracySmoothed"
               stroke="#10b981"
               strokeWidth={3}
               dot={false}
-              name="Cumulative Accuracy"
+              name="Cumulative Accuracy (Smoothed)"
             />
           </ComposedChart>
         </ResponsiveContainer>
