@@ -12,6 +12,7 @@ import {
   Area,
   ComposedChart,
 } from "recharts";
+import { TrendingUp, TrendingDown, Info } from 'lucide-react';
 
 /**
  * ConfidenceEvolutionChart
@@ -119,8 +120,9 @@ const ConfidenceEvolutionChart = ({ data }) => {
     <div style={{ width: "100%", padding: "16px 0" }}>
       {/* Header */}
       <div style={{ marginBottom: 16 }}>
-        <h3 style={{ fontSize: 18, marginBottom: 8, color: "#fff" }}>
-          📈 Confidence Evolution Over Time
+        <h3 style={{ fontSize: 18, marginBottom: 8, color: "#fff", display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <TrendingUp size={22} />
+          Confidence Evolution Over Time
         </h3>
         <p style={{ fontSize: 13, color: "#aaa", marginBottom: 16 }}>
           Shows how the system's prediction accuracy evolves as more data arrives. 
@@ -202,8 +204,9 @@ const ConfidenceEvolutionChart = ({ data }) => {
             >
               {stats.trend >= 0 ? "↗" : "↘"} {Math.abs(stats.trend).toFixed(2)}%
             </div>
-            <div style={{ fontSize: 10, opacity: 0.6, marginTop: 4 }}>
-              {stats.trend >= 0 ? "📈 Improving" : "📉 Degrading"}
+            <div style={{ fontSize: 10, opacity: 0.6, marginTop: 4, display: 'flex', alignItems: 'center', gap: '4px' }}>
+              {stats.trend >= 0 ? <TrendingUp size={14} style={{ color: '#10b981' }} /> : <TrendingDown size={14} style={{ color: '#ef4444' }} />} 
+              {stats.trend >= 0 ? "Improving" : "Degrading"}
             </div>
           </div>
 
@@ -259,7 +262,9 @@ const ConfidenceEvolutionChart = ({ data }) => {
               stroke="#ffffff"
               tick={{ fill: "#ffffff" }}
               domain={[0, 100]}
+              type="number"
               label={{ value: "Accuracy (%)", angle: -90, position: "insideLeft", fill: "#ffffff" }}
+              ticks={[0, 25, 50, 75, 100]}
             />
             <Tooltip content={<CustomTooltip />} />
             <Legend wrapperStyle={{ color: "#ffffff" }} />
@@ -295,15 +300,16 @@ const ConfidenceEvolutionChart = ({ data }) => {
         style={{
           marginTop: 16,
           padding: 16,
-          background: "#1a1a1a",
+          background: "linear-gradient(135deg, #1a1a1a 0%, #252525 100%)",
           border: "1px solid #333",
           borderRadius: 6,
           fontSize: 12,
           color: "#aaa",
         }}
       >
-        <div style={{ marginBottom: 8, fontWeight: "bold", color: "#FF7A00" }}>
-          📊 How to Interpret This Chart:
+        <div style={{ marginBottom: 12, fontWeight: "bold", color: "#FF7A00", display: 'flex', alignItems: 'center', gap: '8px', fontSize: 13 }}>
+          <Info size={16} />
+          How to Interpret This Chart
         </div>
         <ul style={{ margin: 0, paddingLeft: 20, lineHeight: 1.8 }}>
           <li>
@@ -328,7 +334,7 @@ const ConfidenceEvolutionChart = ({ data }) => {
           </li>
         </ul>
         <div style={{ marginTop: 12, fontSize: 11, opacity: 0.7, fontStyle: "italic" }}>
-          💡 A stabilizing cumulative accuracy line indicates the system has "learned" the data
+          A stabilizing cumulative accuracy line indicates the system has "learned" the data
           patterns. An upward trend shows the adaptive ensemble is improving over time.
         </div>
       </div>

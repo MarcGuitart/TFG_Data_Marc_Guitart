@@ -4,7 +4,6 @@
     { "type": "poly",      "name": "poly",       "params": { "degree": 2, "window": 12 }, "init_weight": 0.0 },
     { "type": "alphabeta", "name": "alphabeta",  "params": { "alpha": 0.9, "beta": 0.01, "dt": 1.0 }, "init_weight": 0.0 },
     { "type": "kalman",    "name": "kalman",     "params": { "dt": 1.0, "q_pos": 0.001, "q_vel": 0.001, "r": 0.01, "p0": 1.0 }, "init_weight": 0.0 },
-    { "type": "base",      "name": "base",       "params": {},   "init_weight": 0.0 },
-    { "type": "hyper",     "name": "hyper",      "params": { "window": 5 },   "init_weight": 0.0 }
+    { "type": "base",      "name": "base",       "params": {},   "init_weight": 0.0 }
   ]
 }

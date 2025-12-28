@@ -9,7 +9,7 @@ import { MODEL_COLORS, MODEL_NAMES, KNOWN_MODELS } from "../constants/models";
  * Muestra "visión general del rendimiento" en todo el periodo.
  * 
  * Props:
- * - data: array de puntos con {t, var, prediction, linear, poly, alphabeta, kalman, base, hyper}
+ * - data: array de puntos con {t, var, prediction, linear, poly, alphabeta, kalman, base}
  */
 export default function AP1GlobalChart({ data = [] }) {
   const processedData = useMemo(() => {

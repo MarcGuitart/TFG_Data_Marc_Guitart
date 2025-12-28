@@ -3,12 +3,13 @@ import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, Legend, CartesianGrid,
 } from "recharts";
 import { MODEL_COLORS, MODEL_NAMES } from "../constants/models";
+import { Lightbulb } from 'lucide-react';
 
 /**
- * Weight Evolution Chart: Muestra cómo evolucionan los pesos de los modelos a lo largo del tiempo
+ * Weight Evolution Chart: Muestra cómo evolucionan los pesos de los 5 modelos activos
  * 
  * Props:
- * - data: array de puntos con {t, weight_linear, weight_poly, weight_alphabeta, weight_kalman, weight_base, weight_hyper}
+ * - data: array de puntos con {t, weight_linear, weight_poly, weight_alphabeta, weight_kalman, weight_base}
  */
 export default function WeightEvolutionChart({ data = [] }) {
   const processedData = useMemo(() => {
@@ -25,7 +26,6 @@ export default function WeightEvolutionChart({ data = [] }) {
           weight_alphabeta: Number.isFinite(d?.weight_alphabeta) ? d.weight_alphabeta : 0,
           weight_kalman: Number.isFinite(d?.weight_kalman) ? d.weight_kalman : 0,
           weight_base: Number.isFinite(d?.weight_base) ? d.weight_base : 0,
-          weight_hyper: Number.isFinite(d?.weight_hyper) ? d.weight_hyper : 0,
         };
       })
       .filter((d) => d && d.x);
@@ -49,11 +49,9 @@ export default function WeightEvolutionChart({ data = [] }) {
 
   // Calcular estadísticas de dominancia
   const dominanceStats = useMemo(() => {
-    const models = ["linear", "poly", "alphabeta", "kalman", "base", "hyper"];
+    const models = ["linear", "poly", "alphabeta", "kalman", "base"]; // 5 modelos activos
     const counts = {};
-    models.forEach(m => counts[m] = 0);
-
-    processedData.forEach(point => {
+    models.forEach(m => counts[m] = 0);    processedData.forEach(point => {
       let maxWeight = -Infinity;
       let dominant = null;
       
@@ -146,10 +144,6 @@ export default function WeightEvolutionChart({ data = [] }) {
                 <stop offset="5%" stopColor={MODEL_COLORS.base} stopOpacity={0.8}/>
                 <stop offset="95%" stopColor={MODEL_COLORS.base} stopOpacity={0.3}/>
               </linearGradient>
-              <linearGradient id="colorHyper" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor={MODEL_COLORS.hyper} stopOpacity={0.8}/>
-                <stop offset="95%" stopColor={MODEL_COLORS.hyper} stopOpacity={0.3}/>
-              </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
             <XAxis
@@ -182,7 +176,7 @@ export default function WeightEvolutionChart({ data = [] }) {
               }}
             />
 
-            {/* Stacked Areas */}
+            {/* Stacked Areas - 5 modelos activos */}
             <Area
               type="monotone"
               dataKey="weight_linear"
@@ -223,14 +217,6 @@ export default function WeightEvolutionChart({ data = [] }) {
               fill="url(#colorBase)"
               name="weight_base"
             />
-            <Area
-              type="monotone"
-              dataKey="weight_hyper"
-              stackId="1"
-              stroke={MODEL_COLORS.hyper}
-              fill="url(#colorHyper)"
-              name="weight_hyper"
-            />
           </AreaChart>
         </ResponsiveContainer>
       </div>
@@ -243,11 +229,17 @@ export default function WeightEvolutionChart({ data = [] }) {
         border: "1px solid #333", 
         marginTop: 12,
         fontSize: 11,
-        color: "#aaa"
+        color: "#aaa",
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: '8px'
       }}>
-        <strong>💡 Interpretation:</strong> The system continuously adjusts weights based on recent performance. 
-        When a model consistently predicts accurately, its weight increases (more influence). 
-        Poor predictions decrease weights. The sum of all weights always equals 1.0 (100%).
+        <Lightbulb size={16} style={{ marginTop: 1, flexShrink: 0 }} />
+        <div>
+          <strong>Interpretation:</strong> The system continuously adjusts weights based on recent performance. 
+          When a model consistently predicts accurately, its weight increases (more influence). 
+          Poor predictions decrease weights. All 5 active models shown (Linear, Polynomial, Alpha-Beta, Kalman, Naive).
+        </div>
       </div>
     </div>
   );

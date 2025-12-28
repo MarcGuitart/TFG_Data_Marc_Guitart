@@ -118,6 +118,26 @@
   border-left: 4px solid #ef4444;
 }
 
+.control-message.warning {
+  background: #fef3c7;
+  color: #92400e;
+  border-left: 4px solid #f59e0b;
+}
+
+/* Spinner animation for loading icons */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
 @keyframes slideIn {
   from {
     opacity: 0;

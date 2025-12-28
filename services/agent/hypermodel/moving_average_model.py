@@ -9,7 +9,7 @@ class MovingAverageModel(BaseModel):
     """
     Predictor de media móvil: retorna el promedio de los últimos N valores.
     """
-    def __init__(self, name: str = "hyper", window: int = 5, **kwargs):
+    def __init__(self, name: str = "moving_average", window: int = 5, **kwargs):
         super().__init__(name, **kwargs)
         self.window = window
     

@@ -1,6 +1,21 @@
 import React, { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { 
+  Upload, 
+  Play, 
+  Download, 
+  RefreshCw, 
+  Loader2,
+  CheckCircle,
+  XCircle,
+  AlertTriangle,
+  Target,
+  BarChart3,
+  Brain,
+  Lightbulb,
+  X as CloseIcon
+} from 'lucide-react';
 import "./ControlHeader.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8081";
@@ -20,7 +35,7 @@ export default function ControlHeader({ onIdsUpdate }) {
     if (!file) return;
 
     setUploading(true);
-    setMessage("⏳ Subiendo archivo...");
+    setMessage("Uploading file...");
 
     try {
       const formData = new FormData();
@@ -34,10 +49,10 @@ export default function ControlHeader({ onIdsUpdate }) {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       const data = await res.json();
-      setMessage(`✅ Archivo subido: ${file.name}`);
+      setMessage(`success:File uploaded: ${file.name}`);
       console.log("Upload response:", data);
     } catch (err) {
-      setMessage(`❌ Error: ${err.message}`);
+      setMessage(`error:Upload error: ${err.message}`);
       console.error("Upload error:", err);
     } finally {
       setUploading(false);
@@ -49,7 +64,7 @@ export default function ControlHeader({ onIdsUpdate }) {
   // Run pipeline
   const handleRun = async () => {
     setRunning(true);
-    setMessage("⏳ Ejecutando pipeline...");
+    setMessage("Running pipeline...");
 
     try {
       const res = await fetch(`${API_BASE}/api/run_window`, {
@@ -64,7 +79,7 @@ export default function ControlHeader({ onIdsUpdate }) {
       const rows = data.loader_response?.rows || data.rows_flushed || 0;
       const uniqueIds = data.loader_response?.unique_ids || [];
       
-      setMessage(`✅ Pipeline ejecutado: ${rows} filas procesadas`);
+      setMessage(`success:Pipeline executed: ${rows} rows processed`);
       console.log("Run response:", data);
       console.log("IDs detectados:", uniqueIds);
 
@@ -88,7 +103,7 @@ export default function ControlHeader({ onIdsUpdate }) {
         if (onIdsUpdate) onIdsUpdate();
       }, 2000);
     } catch (err) {
-      setMessage(`❌ Error: ${err.message}`);
+      setMessage(`error:Pipeline error: ${err.message}`);
       console.error("Run error:", err);
     } finally {
       setRunning(false);
@@ -98,7 +113,7 @@ export default function ControlHeader({ onIdsUpdate }) {
   // Export Report (CSV with weights history)
   const handleExport = async () => {
     setExporting(true);
-    setMessage("⏳ Generando reporte...");
+    setMessage("Generating report...");
 
     try {
       // Obtener el ID actual desde el evento seriesSelected o usar "Other"
@@ -115,9 +130,9 @@ export default function ControlHeader({ onIdsUpdate }) {
       link.click();
       document.body.removeChild(link);
       
-      setMessage(`✅ Reporte exportado: weights_history_${currentId}.csv`);
+      setMessage(`success:Report exported: weights_history_${currentId}.csv`);
     } catch (err) {
-      setMessage(`❌ Error exportando: ${err.message}`);
+      setMessage(`error:Export error: ${err.message}`);
       console.error("Export error:", err);
     } finally {
       setExporting(false);
@@ -127,7 +142,7 @@ export default function ControlHeader({ onIdsUpdate }) {
   // Analyze Report with AI
   const handleAnalyze = async () => {
     setAnalyzing(true);
-    setMessage("🤖 Analizando datos con IA...");
+    setMessage("Analyzing data with AI...");
     setAnalysisResult(null);
 
     try {
@@ -148,9 +163,9 @@ export default function ControlHeader({ onIdsUpdate }) {
 
       const data = await res.json();
       setAnalysisResult(data.analysis);
-      setMessage("✅ Análisis completado");
+      setMessage("success:Analysis completed");
     } catch (err) {
-      setMessage(`❌ Error analizando: ${err.message}`);
+      setMessage(`error:Analysis error: ${err.message}`);
       console.error("Analysis error:", err);
     } finally {
       setAnalyzing(false);
@@ -161,17 +176,17 @@ export default function ControlHeader({ onIdsUpdate }) {
   const handleReset = async () => {
     // Confirmar antes de resetear
     const confirmed = window.confirm(
-      "⚠️ Esto limpiará:\n" +
-      "- Todos los pesos acumulados\n" +
-      "- Historial de predicciones\n" +
-      "- Datos de deduplicación\n\n" +
-      "¿Estás seguro?"
+      "This will clear:\n" +
+      "- All accumulated weights\n" +
+      "- Prediction history\n" +
+      "- Deduplication data\n\n" +
+      "Are you sure?"
     );
     
     if (!confirmed) return;
     
     setResetting(true);
-    setMessage("⏳ Reseteando sistema...");
+    setMessage("Resetting system...");
 
     try {
       const res = await fetch(`${API_BASE}/api/reset_system`, {
@@ -184,13 +199,13 @@ export default function ControlHeader({ onIdsUpdate }) {
       console.log("Reset response:", data);
       
       if (data.status === "success") {
-        setMessage(`✅ Sistema reseteado. Listo para nuevo experimento.`);
+        setMessage(`success:System reset. Ready for new experiment.`);
       } else {
-        setMessage(`⚠️ Reseteo parcial. Revisa la consola.`);
+        setMessage(`warning:Partial reset. Check console for details.`);
         console.warn("Reset details:", data.details);
       }
     } catch (err) {
-      setMessage(`❌ Error reseteando: ${err.message}`);
+      setMessage(`error:Reset error: ${err.message}`);
       console.error("Reset error:", err);
     } finally {
       setResetting(false);
@@ -200,7 +215,10 @@ export default function ControlHeader({ onIdsUpdate }) {
   return (
     <div className="control-header">
       <div className="control-section">
-        <h2>🎯 Control Panel</h2>
+        <h2 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Target size={24} />
+          Control Panel
+        </h2>
       </div>
 
       <div className="control-section">
@@ -212,8 +230,8 @@ export default function ControlHeader({ onIdsUpdate }) {
             disabled={uploading || running}
             style={{ display: "none" }}
           />
-          <span className={`btn ${uploading ? "btn-disabled" : "btn-primary"}`}>
-            {uploading ? "⏳ Subiendo..." : "📁 Cargar CSV"}
+          <span className={`btn ${uploading ? "btn-disabled" : "btn-primary"}`} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {uploading ? <><Loader2 size={16} className="spin" /> Uploading...</> : <><Upload size={16} /> Upload CSV</>}
           </span>
         </label>
 
@@ -221,39 +239,45 @@ export default function ControlHeader({ onIdsUpdate }) {
           className={`btn ${running ? "btn-disabled" : "btn-success"}`}
           onClick={handleRun}
           disabled={uploading || running}
+          style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
         >
-          {running ? "⏳ Procesando..." : "🚀 Ejecutar Pipeline"}
+          {running ? <><Loader2 size={16} className="spin" /> Processing...</> : <><Play size={16} /> Execute Pipeline</>}
         </button>
 
         <button
           className={`btn ${exporting ? "btn-disabled" : "btn-info"}`}
           onClick={handleExport}
           disabled={uploading || running || exporting}
+          style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
         >
-          {exporting ? "⏳ Exportando..." : "📊 Exportar Reporte"}
+          {exporting ? <><Loader2 size={16} className="spin" /> Exporting...</> : <><Download size={16} /> Export Report</>}
         </button>
 
         <button
           className={`btn ${analyzing ? "btn-disabled" : "btn-info"}`}
           onClick={handleAnalyze}
           disabled={uploading || running || analyzing}
-          style={{ background: analyzing ? "#666" : "#9333ea" }}
+          style={{ background: analyzing ? "#666" : "#9333ea", display: 'flex', alignItems: 'center', gap: '8px' }}
         >
-          {analyzing ? "🤖 Analizando..." : "🤖 Analizar con IA"}
+          {analyzing ? <><Loader2 size={16} className="spin" /> Analyzing...</> : <><Brain size={16} /> Analyze with AI</>}
         </button>
 
         <button
           className={`btn ${resetting ? "btn-disabled" : "btn-warning"}`}
           onClick={handleReset}
           disabled={uploading || running || exporting || resetting}
+          style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
         >
-          {resetting ? "⏳ Reseteando..." : "🔄 Reset System"}
+          {resetting ? <><Loader2 size={16} className="spin" /> Resetting...</> : <><RefreshCw size={16} /> Reset System</>}
         </button>
       </div>
 
       {message && (
-        <div className={`control-message ${message.startsWith("❌") ? "error" : "success"}`}>
-          {message}
+        <div className={`control-message ${message.startsWith("error:") ? "error" : message.startsWith("success:") ? "success" : "warning"}`} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {message.startsWith("error:") && <XCircle size={16} />}
+          {message.startsWith("success:") && <CheckCircle size={16} />}
+          {message.startsWith("warning:") && <AlertTriangle size={16} />}
+          {message.replace(/^(error:|success:|warning:)/, '')}
         </div>
       )}
 
@@ -312,7 +336,7 @@ export default function ControlHeader({ onIdsUpdate }) {
                   alignItems: "center",
                   gap: "12px"
                 }}>
-                  <span style={{ fontSize: 32 }}>🤖</span>
+                  <Brain size={32} color="#60a5fa" />
                   AI Analysis Report
                 </h2>
                 <p style={{ 
@@ -330,12 +354,13 @@ export default function ControlHeader({ onIdsUpdate }) {
                   background: "rgba(255, 255, 255, 0.1)",
                   border: "1px solid rgba(255, 255, 255, 0.2)",
                   color: "#fff",
-                  fontSize: 24,
+                  fontSize: 20,
                   cursor: "pointer",
                   padding: "8px 14px",
                   borderRadius: 8,
                   transition: "all 0.2s",
-                  fontWeight: "bold",
+                  display: "flex",
+                  alignItems: "center",
                 }}
                 onMouseOver={(e) => {
                   e.target.style.background = "rgba(255, 255, 255, 0.2)";
@@ -344,7 +369,7 @@ export default function ControlHeader({ onIdsUpdate }) {
                   e.target.style.background = "rgba(255, 255, 255, 0.1)";
                 }}
               >
-                ×
+                <CloseIcon size={20} />
               </button>
             </div>
 
@@ -476,9 +501,13 @@ export default function ControlHeader({ onIdsUpdate }) {
               <p style={{ 
                 margin: 0, 
                 color: "#888", 
-                fontSize: 12 
+                fontSize: 12,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
               }}>
-                💡 This analysis was generated using AI and should be validated by domain experts.
+                <Lightbulb size={14} />
+                This analysis was generated using AI and should be validated by domain experts.
               </p>
               <button
                 onClick={() => setAnalysisResult(null)}

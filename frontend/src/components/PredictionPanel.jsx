@@ -6,7 +6,18 @@ import AP1VerificationTable from "./AP1VerificationTable";
 import AP2SelectorTable from "./AP2SelectorTable";
 import AP4MetricsTable from "./AP4MetricsTable";
 import ConfidenceEvolutionChart from "./ConfidenceEvolutionChart";
-import { MODEL_COLORS } from "../constants/models";
+import { MODEL_COLORS, ALL_MODELS } from "../constants/models";
+import { 
+  Play, 
+  BarChart3, 
+  Trophy, 
+  TrendingUp,
+  Info,
+  AlertTriangle,
+  CheckCircle,
+  XCircle,
+  Lightbulb
+} from 'lucide-react';
 
 const API_BASE = "http://localhost:8081";
 const DEFAULT_HOURS = 24;
@@ -173,16 +184,17 @@ const PredictionPanel = forwardRef((props, ref) => {
     if (!points.length) return { nObs: 0, nPred: 0, nModels: 0, confidence: 0 };
     const nObs = points.filter(r => typeof r.var === "number").length;
     const nPred = points.filter(r => typeof r.prediction === "number").length;
-    const modelKeys = new Set();
+    
+  const modelKeys = new Set();
+    
     for (const p of points) {
       Object.keys(p).forEach(k => {
-        if (!["t", "var", "prediction", "chosen_model", "error_abs", "error_rel"].includes(k) && typeof p[k] === "number") {
+        // Solo contar modelos conocidos que tengan predicciones
+        if (ALL_MODELS.includes(k) && typeof p[k] === "number") {
           modelKeys.add(k);
         }
       });
-    }
-    
-    // Calcular confianza general: (1 - Error_Rel_Mean)%
+    }    // Calcular confianza general: (1 - Error_Rel_Mean)%
     const errorsRel = points
       .map(p => p.chosen_error_rel || p.error_rel)
       .filter(e => typeof e === "number" && !isNaN(e) && isFinite(e));
@@ -197,12 +209,12 @@ const PredictionPanel = forwardRef((props, ref) => {
   }, [points]);
 
   const tabButtons = [
-    { id: TABS.DEMO, label: "🎯 Demo", icon: "presentation" },
-    { id: TABS.GLOBAL_STATS, label: "📊 Complete Analysis", icon: "analytics" },
-    { id: TABS.MODELS_RANKING, label: "🏆 Models Ranking", icon: "medal" },
-    { id: TABS.CONFIDENCE_EVOLUTION, label: "� Confidence Evolution", icon: "trending-up" },
-    { id: TABS.AP1_ZOOM, label: "🔍 Zoom Detail", icon: "zoom", hidden: true },
-    { id: TABS.VERIFY, label: "✓ Verification", icon: "check", hidden: true },
+    { id: TABS.DEMO, label: "Demo", icon: Play },
+    { id: TABS.GLOBAL_STATS, label: "Complete Analysis", icon: BarChart3 },
+    { id: TABS.MODELS_RANKING, label: "Models Ranking", icon: Trophy },
+    { id: TABS.CONFIDENCE_EVOLUTION, label: "Confidence Evolution", icon: TrendingUp },
+    { id: TABS.AP1_ZOOM, label: "Zoom Detail", icon: null, hidden: true },
+    { id: TABS.VERIFY, label: "Verification", icon: null, hidden: true },
   ];
 
   return (
@@ -262,24 +274,32 @@ const PredictionPanel = forwardRef((props, ref) => {
       {/* Tab buttons */}
       {points.length > 0 && (
         <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-          {tabButtons.filter(btn => !btn.hidden).map((btn) => (
-            <button
-              key={btn.id}
-              onClick={() => setActiveTab(btn.id)}
-              style={{
-                padding: "6px 12px",
-                background: activeTab === btn.id ? "#FF7A00" : "#333",
-                border: "1px solid #555",
-                borderRadius: 4,
-                color: "#fff",
-                cursor: "pointer",
-                fontSize: 12,
-                fontWeight: activeTab === btn.id ? "bold" : "normal",
-              }}
-            >
-              {btn.label}
-            </button>
-          ))}
+          {tabButtons.filter(btn => !btn.hidden).map((btn) => {
+            const Icon = btn.icon;
+            return (
+              <button
+                key={btn.id}
+                onClick={() => setActiveTab(btn.id)}
+                style={{
+                  padding: "8px 16px",
+                  background: activeTab === btn.id ? "#FF7A00" : "#333",
+                  border: "1px solid #555",
+                  borderRadius: 6,
+                  color: "#fff",
+                  cursor: "pointer",
+                  fontSize: 12,
+                  fontWeight: activeTab === btn.id ? "bold" : "normal",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  transition: "all 0.2s"
+                }}
+              >
+                {Icon && <Icon size={16} />}
+                {btn.label}
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -297,18 +317,27 @@ const PredictionPanel = forwardRef((props, ref) => {
           {activeTab === TABS.DEMO && (
             <div>
               <div style={{ marginBottom: 24 }}>
-                <h3 style={{ fontSize: 16, marginBottom: 12 }}></h3>
+                <h3 style={{ fontSize: 16, marginBottom: 12, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Play size={20} />
+                  Live Predictions
+                </h3>
                 <AP1GlobalChart data={points} />
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 24 }}>
                 <div>
-                  <h3 style={{ fontSize: 16, marginBottom: 12 }}>Decisiones del Selector (AP2)</h3>
+                  <h3 style={{ fontSize: 16, marginBottom: 12, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <BarChart3 size={18} />
+                    Selector Decisions (AP2)
+                  </h3>
                   <AP2SelectorTable data={selectorData} maxRows={10} />
                 </div>
 
                 <div>
-                  <h3 style={{ fontSize: 16, marginBottom: 12 }}>Ranking de Modelos (AP4)</h3>
+                  <h3 style={{ fontSize: 16, marginBottom: 12, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Trophy size={18} style={{ color: '#f59e0b' }} />
+                    Model Rankings (AP4)
+                  </h3>
                   <AP4MetricsTable data={metricsData} />
                 </div>
               </div>
@@ -317,7 +346,10 @@ const PredictionPanel = forwardRef((props, ref) => {
 
           {activeTab === TABS.GLOBAL_STATS && (
             <div>
-              <h3 style={{ fontSize: 18, marginBottom: 16 }}>Análisis Global Completo - Todos los Datos</h3>
+              <h3 style={{ fontSize: 18, marginBottom: 16, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <BarChart3 size={22} />
+                Complete Global Analysis - All Data
+              </h3>
               
               {/* Estadísticas generales */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginBottom: 24 }}>
@@ -347,7 +379,7 @@ const PredictionPanel = forwardRef((props, ref) => {
                   <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>
                     Overall Confidence Score
                     <span style={{ marginLeft: 8, fontSize: 9, opacity: 0.6 }}>
-                      (1 - Error Relativo Medio)
+                      (1 - Mean Relative Error)
                     </span>
                   </div>
                   <div style={{ 
@@ -358,18 +390,23 @@ const PredictionPanel = forwardRef((props, ref) => {
                   }}>
                     {info.confidence.toFixed(2)}%
                   </div>
-                  <div style={{ fontSize: 10, opacity: 0.6, marginTop: 4 }}>
-                    {info.confidence >= 85 ? "🎯 Excelente precisión" : 
-                     info.confidence >= 75 ? "⚠️ Precisión aceptable" : 
-                     "❌ Precisión baja"}
+                  <div style={{ fontSize: 10, opacity: 0.6, marginTop: 4, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {info.confidence >= 85 ? (
+                      <><CheckCircle size={14} style={{ color: '#10b981' }} /> Excellent accuracy</>
+                    ) : info.confidence >= 75 ? (
+                      <><AlertTriangle size={14} style={{ color: '#f59e0b' }} /> Acceptable accuracy</>
+                    ) : (
+                      <><XCircle size={14} style={{ color: '#ef4444' }} /> Low accuracy</>
+                    )}
                   </div>
                 </div>
               </div>
 
               {/* Distribución de modelos elegidos */}
               <div style={{ background: "#1a1a1a", padding: 16, borderRadius: 6, border: "1px solid #333", marginBottom: 24 }}>
-                <h4 style={{ fontSize: 14, marginBottom: 12, color: "#FF7A00" }}>
-                  Distribución de Modelos Elegidos (chosen_model)
+                <h4 style={{ fontSize: 14, marginBottom: 12, color: "#FF7A00", display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <BarChart3 size={18} />
+                  Model Selection Distribution
                 </h4>
                 {(() => {
                   const modelCounts = {};
@@ -418,24 +455,27 @@ const PredictionPanel = forwardRef((props, ref) => {
 
               {/* Gráfico completo */}
               <div style={{ marginBottom: 24 }}>
-                <h4 style={{ fontSize: 14, marginBottom: 12, color: "#FF7A00" }}>
-                  📈 Visualización Completa de la Serie
+                <h4 style={{ fontSize: 14, marginBottom: 12, color: "#FF7A00", display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <TrendingUp size={18} />
+                  Complete Series Visualization
                 </h4>
                 <AP1GlobalChart data={points} />
               </div>
 
               {/* Tabla completa con todos los puntos */}
               <div style={{ marginBottom: 24 }}>
-                <h4 style={{ fontSize: 14, marginBottom: 12, color: "#FF7A00" }}>
-                  📋 Tabla Completa de Decisiones (todos los puntos)
+                <h4 style={{ fontSize: 14, marginBottom: 12, color: "#FF7A00", display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Info size={18} />
+                  Complete Decision Table
                 </h4>
                 <AP2SelectorTable data={selectorData} maxRows={9999} />
               </div>
 
-              {/* Métricas de rendimiento */}
+              {/* Métricas de rendimiento con panel formal */}
               <div>
-                <h4 style={{ fontSize: 20, marginBottom: 12, color: "#ffffffff" }}>
-                  Ranking Final de Modelos:
+                <h4 style={{ fontSize: 20, marginBottom: 16, color: "#ffffffff", display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Trophy size={24} style={{ color: '#f59e0b' }} />
+                  Model Performance Rankings
                 </h4>
                 <AP4MetricsTable data={metricsData} />
               </div>

@@ -17,6 +17,7 @@ MODEL_REGISTRY = {
     "kalman": KalmanModel,
     "base": NaiveModel,
     "hyper": MovingAverageModel,
+    "moving_average": MovingAverageModel,
 }
 
 class HyperModel:

@@ -145,6 +145,8 @@ services:
     networks: [ tfg_net ]
     volumes:
       - ../data:/app/data
+    env_file:
+      - .env
     environment:
       - INFLUX_URL=http://influxdb:8086
       - INFLUX_TOKEN=admin_token
@@ -153,7 +155,6 @@ services:
       - LOADER_URL=http://window_loader:8083/trigger
       - COLLECTOR_URL=http://window_collector:8082/reset
       - COLLECTOR_FLUSH=http://window_collector:8082/flush
-      - GROQ_API_KEY=${GROQ_API_KEY}
     restart: always
 
 volumes:

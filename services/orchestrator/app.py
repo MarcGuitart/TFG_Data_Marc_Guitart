@@ -487,11 +487,12 @@ def get_series(
             "error_abs": ensemble_error_abs,  # Error absoluto del ENSEMBLE
             "error_rel": ensemble_error_rel,  # Error relativo del ENSEMBLE
             "error_rel_mean": ensemble_error_rel_mean,  # MAPE del ENSEMBLE (para ConfidenceEvolutionChart)
-            "hyper_models": {                # Modelos individuales
+            "hyper_models": {                # Modelos individuales (5 modelos activos)
                 "kalman": b["models"].get("kalman"),
                 "linear": b["models"].get("linear"),
                 "poly": b["models"].get("poly"),
                 "alphabeta": b["models"].get("alphabeta"),
+                "base": b["models"].get("base"),
             }
         }
         for model, yhat in b["models"].items():
@@ -1067,20 +1068,34 @@ def reset_system():
         start = "1970-01-01T00:00:00Z"
         stop = (datetime.utcnow() + timedelta(days=1)).isoformat() + "Z"
         
-        # Borrar measurement: telemetry (predicciones, valores reales, pesos)
-        delete_api.delete(start, stop, '_measurement="telemetry"', 
-                          bucket=INFLUX_BUCKET, org=INFLUX_ORG)
+        # Lista de TODOS los measurements que se escriben
+        measurements = [
+            "telemetry",           # predicciones y valores reales
+            "telemetry_models",    # predicciones por modelo individual
+            "weights",             # pesos del ensemble
+            "chosen_model",        # modelo elegido
+            "chosen_error",        # errores del modelo elegido
+            "model_errors",        # errores por modelo
+            "model_rankings",      # ranking de modelos
+            "model_rewards",       # rewards de modelos
+            "weight_decisions"     # decisiones de cambio de pesos
+        ]
         
-        # Borrar measurement: chosen_model (modelo elegido por el selector)
-        delete_api.delete(start, stop, '_measurement="chosen_model"', 
-                          bucket=INFLUX_BUCKET, org=INFLUX_ORG)
-        
-        # Borrar measurement: chosen_error (errores del modelo elegido)
-        delete_api.delete(start, stop, '_measurement="chosen_error"', 
-                          bucket=INFLUX_BUCKET, org=INFLUX_ORG)
+        deleted_count = 0
+        for measurement in measurements:
+            try:
+                delete_api.delete(start, stop, f'_measurement="{measurement}"', 
+                                  bucket=INFLUX_BUCKET, org=INFLUX_ORG)
+                deleted_count += 1
+            except Exception as e:
+                logger.warning(f"Could not delete {measurement}: {e}")
         
         client.close()
-        results["influxdb"] = {"status": "success", "message": "All historical data deleted from InfluxDB"}
+        results["influxdb"] = {
+            "status": "success", 
+            "message": f"Deleted {deleted_count}/{len(measurements)} measurements from InfluxDB",
+            "measurements_deleted": deleted_count
+        }
     except Exception as e:
         results["influxdb"] = {"status": "error", "message": str(e)}
     
@@ -1364,7 +1379,7 @@ async def analyze_report(id: str):
                 # Comparar primer 25% vs último 25%
                 first_quarter = sum(weights[:len(weights)//4]) / (len(weights)//4)
                 last_quarter = sum(weights[-len(weights)//4:]) / (len(weights)//4)
-                trend = "📈 Increasing" if last_quarter > first_quarter * 1.2 else "📉 Decreasing" if last_quarter < first_quarter * 0.8 else "➡️ Stable"
+                trend = "Increasing" if last_quarter > first_quarter * 1.2 else "Decreasing" if last_quarter < first_quarter * 0.8 else "Stable"
                 weight_evolution[model] = trend
         
         # Construir prompt detallado con TODOS los datos
@@ -1382,21 +1397,21 @@ async def analyze_report(id: str):
         prompt = f"""You are an expert analyst in adaptive prediction systems and ensemble learning.
 
 SYSTEM CONTEXT:
-This is a SOFT ensemble prediction system combining 6 different models:
+This is a SOFT ensemble prediction system combining 5 different models:
 - **linear**: Simple linear regression
 - **poly**: Polynomial regression (degree 2)
 - **alphabeta**: Alpha-Beta filter (trend tracking)
 - **kalman**: Kalman filter (Bayesian optimal)
-- **base**: Naive model (last observed value)
-- **hyper**: Adaptive moving average
+- **base**: Naive model (last observed value / persistence)
 
 The system adjusts model WEIGHTS in real-time based on recent performance.
 Final prediction: prediction = Σ(weight_i × pred_i)
 
 EXPERIMENT DATA:
 Total processed points: {total_points}
-Ensemble MAE: {round(ensemble_mae, 6)}
+Ensemble MAE: {round(ensemble_mae, 4)}
 Ensemble MAPE: {round(ensemble_mape, 2)}%
+Overall Accuracy: {round(100 - ensemble_mape, 2)}%
 
 MODEL STATISTICS:
 {chr(10).join([f"**{model}**:" + chr(10) + 
@@ -1416,47 +1431,50 @@ DATA SAMPLE (first and last points):
 REQUIRED ANALYSIS:
 Provide a DEEP and INSIGHTFUL analysis in Markdown format with the following sections:
 
-## 🎯 Executive Summary
-Concise description of overall system performance (2-3 lines).
+## Executive Summary
+Concise description of overall system performance (2-3 lines) with accuracy metrics.
 
-## 📊 Model Performance Analysis
+## Model Performance Analysis
 
-### 🥇 Top Performers
+### Top Performers
 Identify the 2-3 best models and explain:
 - Why they have high weights
 - What time series characteristics favor these models
 - When they are most effective
+- Specific MAE and MAPE values
 
-### 📉 Weak Models
+### Weak Models
 Identify underperforming models and explain:
-- Why they have low or negative weights
-- What patterns they CANNOT capture
-- Analysis of their contribution to the ensemble
+- Why they have low weights
+- What patterns they CANNOT capture effectively
+- Their contribution to ensemble diversity
 
-## 🔄 Weight Evolution
+## Weight Evolution
 
 Analyze how weights changed during the experiment:
-- Which models gained confidence?
-- Which models lost it?
-- What does this indicate about the data nature?
+- Which models gained confidence over time?
+- Which models lost confidence?
+- What does this indicate about the underlying data patterns?
+- Stability analysis (convergence vs oscillation)
 
-## 💡 Technical Insights
+## Technical Insights
 
-- **Ensemble Stability**: Did weights converge or continue oscillating?
-- **Model Diversity**: Does the system use multiple models or depend on one?
-- **Prediction Quality**: Is the MAE/MAPE acceptable for the domain?
-- **Error Distribution**: Are errors consistent or do they vary significantly?
+- **Ensemble Stability**: Did weights converge or continue oscillating? What does this mean?
+- **Model Diversity**: Does the system rely on multiple models or is it dominated by one?
+- **Prediction Quality**: Is the MAE/MAPE acceptable? How does it compare to baseline (naive)?
+- **Error Distribution**: Are errors consistent or do they vary significantly throughout the series?
+- **Recommendations**: Specific suggestions for improvement based on observed patterns
 
-FORMAT:
-- Use rich Markdown with headers (##, ###)
-- Include relevant emojis
-- Be specific and quantitative
-- Avoid generalities
-- Length: 600-900 words
-- Tone: Professional but accessible
+FORMAT REQUIREMENTS:
+- Use clean Markdown with headers (##, ###)
+- NO EMOJIS - professional technical report style
+- Be specific and quantitative with actual numbers from the data
+- Avoid vague generalities - reference specific metrics
+- Length: 700-1000 words
+- Tone: Professional, technical, data-driven
 - Language: ENGLISH
 
-IMPORTANT! Base your analysis on the REAL DATA provided, not generic assumptions."""
+CRITICAL: Base your analysis EXCLUSIVELY on the REAL DATA provided above. Do not make assumptions about missing data or use placeholder reasoning. If real values show MAE=0, question if this indicates perfect prediction or data quality issues."""
 
         # Llamar a Groq API
         client = Groq(api_key=api_key)

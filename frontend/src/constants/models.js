@@ -2,8 +2,11 @@
  * Constantes compartidas para modelos predictivos
  */
 
-// Lista de modelos predictivos conocidos
-export const KNOWN_MODELS = ["linear", "poly", "alphabeta", "kalman", "base", "hyper"];
+// Lista de modelos predictivos activos (5 modelos)
+export const KNOWN_MODELS = ["linear", "poly", "alphabeta", "kalman", "base"];
+
+// Todos los modelos incluidos en visualización
+export const ALL_MODELS = KNOWN_MODELS;
 
 // Colores para cada modelo (mantener consistencia en todos los gráficos)
 export const MODEL_COLORS = {
@@ -11,11 +14,10 @@ export const MODEL_COLORS = {
   linear: "#3b82f6",      // azul
   poly: "#10b981",        // verde esmeralda
   alphabeta: "#f59e0b",   // naranja/amber
-  kalman: "#8b5cf6",      // violeta
+  kalman: "#412f69ff",    // violeta
   
-  // Modelos baseline
-  base: "#6b7280",        // gris (naive/persistencia)
-  hyper: "#ec4899",       // rosa/magenta (media móvil)
+  // Modelo baseline
+  base: "#837171ff",      // gris (naive/persistencia)
   
   // Predicción final y valor real
   var: "#00A3FF",         // azul claro (tráfico real)
@@ -29,10 +31,9 @@ export const MODEL_NAMES = {
   alphabeta: "Alpha-Beta Filter",
   kalman: "Kalman Filter",
   base: "Naive (Persistence)",
-  hyper: "Moving Average",
   var: "Real Traffic",
   prediction: "Adaptive Ensemble",
 };
 
 // Colores por defecto (fallback)
-export const DEFAULT_MODEL_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#6b7280", "#ec4899"];
+export const DEFAULT_MODEL_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#412f69ff", "#837171ff", "#ec4899"];
