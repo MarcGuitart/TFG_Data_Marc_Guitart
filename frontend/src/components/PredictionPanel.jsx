@@ -194,7 +194,9 @@ const PredictionPanel = forwardRef((props, ref) => {
           modelKeys.add(k);
         }
       });
-    }    // Calcular confianza general: (1 - Error_Rel_Mean)%
+    }    
+    // Calcular confianza general: (1 - Mean MAPE%)
+    // NOTE: chosen_error_rel and error_rel come from backend as PERCENTAGE (0-100%), not as ratio (0-1)
     const errorsRel = points
       .map(p => p.chosen_error_rel || p.error_rel)
       .filter(e => typeof e === "number" && !isNaN(e) && isFinite(e));
@@ -202,6 +204,7 @@ const PredictionPanel = forwardRef((props, ref) => {
     let confidence = 0;
     if (errorsRel.length > 0) {
       const meanErrorRel = errorsRel.reduce((a, b) => a + Math.abs(b), 0) / errorsRel.length;
+      // error_rel is already percentage (0-100), so just subtract from 100 and clamp
       confidence = Math.max(0, Math.min(100, 100 - meanErrorRel));
     }
     

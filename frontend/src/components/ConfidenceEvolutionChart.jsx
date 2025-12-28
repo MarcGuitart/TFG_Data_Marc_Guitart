@@ -29,21 +29,28 @@ const ConfidenceEvolutionChart = ({ data }) => {
     if (!data || data.length === 0) return [];
 
     // Calculate cumulative accuracy for each point
+    // NOTE: error_rel_mean comes from backend as PERCENTAGE (0-100), not as ratio (0-1)
     const processed = [];
     let cumulativeErrorSum = 0;
     let validCount = 0;
 
     data.forEach((point, idx) => {
-      // Calculate point accuracy (100% - error_rel_mean which is MAPE)
-      const pointAccuracy = point.error_rel_mean != null 
-        ? 100 - point.error_rel_mean 
+      // error_rel_mean is already MAPE in percentage (0-100%)
+      const mapePercentage = point.error_rel_mean;
+      
+      // Calculate point accuracy (100% - MAPE%), clamped to [0, 100]
+      const pointAccuracy = mapePercentage != null 
+        ? Math.max(0, Math.min(100, 100 - mapePercentage))
         : null;
 
       // Update cumulative accuracy
-      if (pointAccuracy != null) {
-        cumulativeErrorSum += point.error_rel_mean;
+      if (pointAccuracy != null && mapePercentage != null) {
+        cumulativeErrorSum += mapePercentage;
         validCount += 1;
-        const cumulativeAccuracy = 100 - (cumulativeErrorSum / validCount);
+        // Cumulative MAPE is average of all MAPE values
+        const cumulativeMAPE = cumulativeErrorSum / validCount;
+        // Cumulative accuracy clamped to [0, 100]
+        const cumulativeAccuracy = Math.max(0, Math.min(100, 100 - cumulativeMAPE));
 
         processed.push({
           index: idx + 1,
