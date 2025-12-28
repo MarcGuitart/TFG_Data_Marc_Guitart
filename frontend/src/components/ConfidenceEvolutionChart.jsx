@@ -61,6 +61,22 @@ const ConfidenceEvolutionChart = ({ data }) => {
       }
     });
 
+    // Apply smoothing to cumulative accuracy using a 5-point moving average
+    // This reduces visual abruptness when single points have very low accuracy
+    const smoothingWindow = Math.min(5, Math.ceil(processed.length / 10));
+    if (processed.length > 1 && smoothingWindow > 1) {
+      for (let i = 0; i < processed.length; i++) {
+        const start = Math.max(0, i - Math.floor(smoothingWindow / 2));
+        const end = Math.min(processed.length, i + Math.floor(smoothingWindow / 2) + 1);
+        const window = processed.slice(start, end);
+        const smoothedAccuracy = window.reduce((sum, p) => sum + p.cumulativeAccuracy, 0) / window.length;
+        processed[i].cumulativeAccuracySmoothed = parseFloat(smoothedAccuracy.toFixed(2));
+      }
+    } else {
+      // If not enough data points for smoothing, use original values
+      processed.forEach(p => p.cumulativeAccuracySmoothed = p.cumulativeAccuracy);
+    }
+
     return processed;
   }, [data]);
 
@@ -71,19 +87,19 @@ const ConfidenceEvolutionChart = ({ data }) => {
     const firstHalf = processedData.slice(0, Math.floor(processedData.length / 2));
     const secondHalf = processedData.slice(Math.floor(processedData.length / 2));
 
-    const avgFirst = firstHalf.reduce((sum, p) => sum + p.cumulativeAccuracy, 0) / firstHalf.length;
-    const avgSecond = secondHalf.reduce((sum, p) => sum + p.cumulativeAccuracy, 0) / secondHalf.length;
+    const avgFirst = firstHalf.reduce((sum, p) => sum + p.cumulativeAccuracySmoothed, 0) / firstHalf.length;
+    const avgSecond = secondHalf.reduce((sum, p) => sum + p.cumulativeAccuracySmoothed, 0) / secondHalf.length;
     const trend = avgSecond - avgFirst;
 
     const final = processedData[processedData.length - 1];
     const initial = processedData[0];
 
     return {
-      initial: initial.cumulativeAccuracy,
-      final: final.cumulativeAccuracy,
+      initial: initial.cumulativeAccuracySmoothed,
+      final: final.cumulativeAccuracySmoothed,
       trend: trend,
-      improvement: final.cumulativeAccuracy - initial.cumulativeAccuracy,
-      avgAccuracy: processedData.reduce((sum, p) => sum + p.cumulativeAccuracy, 0) / processedData.length,
+      improvement: final.cumulativeAccuracySmoothed - initial.cumulativeAccuracySmoothed,
+      avgAccuracy: processedData.reduce((sum, p) => sum + p.cumulativeAccuracySmoothed, 0) / processedData.length,
     };
   }, [processedData]);
 
@@ -101,12 +117,12 @@ const ConfidenceEvolutionChart = ({ data }) => {
           }}
         >
           <div style={{ marginBottom: 8, fontWeight: "bold", color: "#FF7A00" }}>
-            Point #{data.index} (t={data.t})
+            Point #{data.index} 
           </div>
           <div style={{ color: "#60a5fa", marginBottom: 4 }}>
             <strong>Point Accuracy:</strong> {data.pointAccuracy}%
           </div>
-          <div style={{ color: "#10b981", marginBottom: 0 }}>
+          <div style={{ color: "#10b981", marginBottom: 4 }}>
             <strong>Cumulative Accuracy:</strong> {data.cumulativeAccuracy}%
           </div>
         </div>
@@ -247,7 +263,7 @@ const ConfidenceEvolutionChart = ({ data }) => {
       {/* Chart */}
       <div style={{ background: "#1a1a1a", padding: 16, borderRadius: 6, border: "1px solid #333" }}>
         <ResponsiveContainer width="100%" height={400}>
-          <ComposedChart data={processedData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+          <ComposedChart data={processedData} margin={{ top: 10, right: 30, left: 60, bottom: 60 }}>
             <defs>
               <linearGradient id="excellentZone" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="#10b981" stopOpacity={0.3} />
@@ -263,18 +279,18 @@ const ConfidenceEvolutionChart = ({ data }) => {
               dataKey="index"
               stroke="#ffffff"
               tick={{ fill: "#ffffff" }}
-              label={{ value: "Data Points", position: "insideBottomRight", offset: -15, fill: "#ffffff" }}
+              label={{ value: "Data Points", position: "bottom", offset: 10, fill: "#ffffff", fontSize: 12 }}
             />
             <YAxis
               stroke="#ffffff"
               tick={{ fill: "#ffffff" }}
               domain={[0, 100]}
               type="number"
-              label={{ value: "Accuracy (%)", angle: -90, position: "insideLeft", fill: "#ffffff" }}
+              label={{ value: "Accuracy (%)", angle: -90, position: "left", offset: 10, fill: "#ffffff", fontSize: 12 }}
               ticks={[0, 25, 50, 75, 100]}
             />
             <Tooltip content={<CustomTooltip />} />
-            <Legend wrapperStyle={{ color: "#ffffff" }} verticalAlign="top" height={36} />
+            <Legend wrapperStyle={{ color: "#ffffff", paddingTop: "20px" }} verticalAlign="bottom" height={36} />
 
             {/* Confidence Bands */}
             <ReferenceLine y={85} stroke="#10b981" strokeDasharray="5 5" strokeWidth={2} />
@@ -292,11 +308,11 @@ const ConfidenceEvolutionChart = ({ data }) => {
             />
             <Line
               type="monotone"
-              dataKey="cumulativeAccuracy"
+              dataKey="cumulativeAccuracySmoothed"
               stroke="#10b981"
               strokeWidth={3}
               dot={false}
-              name="Cumulative Accuracy"
+              name="Cumulative Accuracy (Smoothed)"
             />
           </ComposedChart>
         </ResponsiveContainer>
@@ -325,7 +341,7 @@ const ConfidenceEvolutionChart = ({ data }) => {
           </li>
           <li>
             <strong style={{ color: "#10b981" }}>Cumulative Accuracy (green):</strong> Overall
-            accuracy from the beginning to current point (stabilizes over time)
+            accuracy from the beginning to current point
           </li>
           <li>
             <strong style={{ color: "#10b981" }}>Green zone (≥85%):</strong> Excellent prediction
