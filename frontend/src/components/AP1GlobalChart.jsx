@@ -2,31 +2,14 @@ import React, { useMemo } from "react";
 import {
   ResponsiveContainer, ComposedChart, XAxis, YAxis, Tooltip, Legend, Line, CartesianGrid,
 } from "recharts";
-
-const MODEL_NAMES = {
-  var: "Real Traffic",
-  prediction: "Adaptive Model",
-  linear: "Linear Model",
-  poly: "Polynomial Model",
-  alphabeta: "Alpha-Beta Model",
-  kalman: "Kalman Model",
-};
-
-const MODEL_COLORS = {
-  var: "#00A3FF",
-  prediction: "#FF7A00",
-  linear: "#3b82f6",
-  poly: "#10b981",
-  alphabeta: "#f59e0b",
-  kalman: "#6743bbff",
-};
+import { MODEL_COLORS, MODEL_NAMES, KNOWN_MODELS } from "../constants/models";
 
 /**
  * AP1: Gráfica GLOBAL de toda la serie con Real + Adaptativo + Todos los modelos.
  * Muestra "visión general del rendimiento" en todo el periodo.
  * 
  * Props:
- * - data: array de puntos con {t, var, prediction, linear, poly, alphabeta, kalman}
+ * - data: array de puntos con {t, var, prediction, linear, poly, alphabeta, kalman, base, hyper}
  */
 export default function AP1GlobalChart({ data = [] }) {
   const processedData = useMemo(() => {
@@ -35,15 +18,20 @@ export default function AP1GlobalChart({ data = [] }) {
         const x = d.x || (Number.isFinite(d?.t) ? new Date(d.t).toISOString().slice(0, 19) + "Z" : undefined);
         if (!x) return null;
 
-        return {
+        const point = {
           x,
           var: Number.isFinite(d?.var) ? d.var : undefined,
           prediction: Number.isFinite(d?.prediction) ? d.prediction : undefined,
-          linear: Number.isFinite(d?.linear) ? d.linear : undefined,
-          poly: Number.isFinite(d?.poly) ? d.poly : undefined,
-          alphabeta: Number.isFinite(d?.alphabeta) ? d.alphabeta : undefined,
-          kalman: Number.isFinite(d?.kalman) ? d.kalman : undefined,
         };
+        
+        // Añadir todos los modelos conocidos dinámicamente
+        KNOWN_MODELS.forEach(model => {
+          if (Number.isFinite(d?.[model])) {
+            point[model] = d[model];
+          }
+        });
+        
+        return point;
       })
       .filter((d) => d && d.x && (Number.isFinite(d.var) || Number.isFinite(d.prediction)));
   }, [data]);
@@ -115,46 +103,19 @@ export default function AP1GlobalChart({ data = [] }) {
             />
 
             {/* Modelos individuales (líneas finas semi-transparentes) */}
-            <Line
-              type="monotone"
-              dataKey="linear"
-              name="linear"
-              stroke={MODEL_COLORS.linear}
-              strokeWidth={1}
-              strokeOpacity={0.6}
-              dot={false}
-              connectNulls
-            />
-            <Line
-              type="monotone"
-              dataKey="poly"
-              name="poly"
-              stroke={MODEL_COLORS.poly}
-              strokeWidth={1}
-              strokeOpacity={0.6}
-              dot={false}
-              connectNulls
-            />
-            <Line
-              type="monotone"
-              dataKey="alphabeta"
-              name="alphabeta"
-              stroke={MODEL_COLORS.alphabeta}
-              strokeWidth={1}
-              strokeOpacity={0.6}
-              dot={false}
-              connectNulls
-            />
-            <Line
-              type="monotone"
-              dataKey="kalman"
-              name="kalman"
-              stroke={MODEL_COLORS.kalman}
-              strokeWidth={1}
-              strokeOpacity={0.6}
-              dot={false}
-              connectNulls
-            />
+            {KNOWN_MODELS.map((modelName) => (
+              <Line
+                key={modelName}
+                type="monotone"
+                dataKey={modelName}
+                name={modelName}
+                stroke={MODEL_COLORS[modelName] || "#6b7280"}
+                strokeWidth={1}
+                strokeOpacity={0.6}
+                dot={false}
+                connectNulls
+              />
+            ))}
           </ComposedChart>
         </ResponsiveContainer>
       </div>

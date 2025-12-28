@@ -465,6 +465,15 @@ def get_series(
         # AP1 FIX: y_adaptive DEBE ser exactamente el valor del modelo elegido, no la predicción híbrida
         y_adaptive = b["models"].get(chosen) if chosen and chosen in b["models"] else c_val
         
+        # Calcular error del ensemble (prediction final ponderada)
+        ensemble_error_abs = None
+        ensemble_error_rel = None
+        ensemble_error_rel_mean = None  # MAPE para este punto
+        if a_val is not None and c_val is not None:
+            ensemble_error_abs = abs(c_val - a_val)
+            ensemble_error_rel = (ensemble_error_abs / abs(a_val)) * 100 if a_val != 0 else 0
+            ensemble_error_rel_mean = ensemble_error_rel  # Para este punto, es lo mismo
+        
         point = {
             "t": int(t.timestamp() * 1000),  # epoch ms
             "timestamp": t.isoformat(),      # ISO timestamp para LivePredictionChart
@@ -473,8 +482,11 @@ def get_series(
             "prediction": c_val,             # predicción híbrida (legacy)
             "y_adaptive": y_adaptive,        # AP1: campo explícito para verificación
             "chosen_model": chosen,          # AP2: modelo elegido
-            "chosen_error_abs": err_info.get("error_abs"),  # AP2: error absoluto
-            "chosen_error_rel": err_info.get("error_rel"),  # AP2: error relativo
+            "chosen_error_abs": err_info.get("error_abs"),  # AP2: error absoluto del chosen
+            "chosen_error_rel": err_info.get("error_rel"),  # AP2: error relativo del chosen
+            "error_abs": ensemble_error_abs,  # Error absoluto del ENSEMBLE
+            "error_rel": ensemble_error_rel,  # Error relativo del ENSEMBLE
+            "error_rel_mean": ensemble_error_rel_mean,  # MAPE del ENSEMBLE (para ConfidenceEvolutionChart)
             "hyper_models": {                # Modelos individuales
                 "kalman": b["models"].get("kalman"),
                 "linear": b["models"].get("linear"),
@@ -902,7 +914,8 @@ def download_weights_csv(unit_id: str):
     """
     Descarga el historial de pesos como CSV.
     1. Pide al agente el historial completo
-    2. Convierte a CSV y devuelve como archivo descargable
+    2. Convierte a CSV y guarda en /app/data para análisis de IA
+    3. Devuelve como archivo descargable
     """
     try:
         # Obtener historial del agente
@@ -914,7 +927,7 @@ def download_weights_csv(unit_id: str):
         if not history:
             raise HTTPException(status_code=404, detail=f"No history for {unit_id}")
         
-        # Convertir a CSV
+        # Convertir a CSV en memoria
         output = StringIO()
         fieldnames = list(history[0].keys())
         writer = csv.DictWriter(output, fieldnames=fieldnames)
@@ -930,12 +943,18 @@ def download_weights_csv(unit_id: str):
                     row[k] = v
             writer.writerow(row)
         
+        csv_content = output.getvalue()
+        
+        # Guardar en /app/data para análisis de IA
+        csv_path = f"/app/data/weights_history_{unit_id}.csv"
+        with open(csv_path, 'w') as f:
+            f.write(csv_content)
+        
         # Devolver como archivo descargable
-        output.seek(0)
         filename = f"weights_history_{unit_id}.csv"
         
         return StreamingResponse(
-            iter([output.getvalue()]),
+            iter([csv_content]),
             media_type="text/csv",
             headers={"Content-Disposition": f"attachment; filename={filename}"}
         )
@@ -1036,36 +1055,47 @@ def reset_system():
     except Exception as e:
         results["agent"] = {"status": "error", "message": str(e)}
     
-    # 3. InfluxDB cleanup (OPCIONAL - comentado por seguridad)
-    # Si quieres limpiar InfluxDB, descomenta esto:
-    # try:
-    #     from influxdb_client import InfluxDBClient
-    #     from influxdb_client.client.delete_api import DeleteApi
-    #     
-    #     client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
-    #     delete_api = client.delete_api()
-    #     
-    #     # Borrar últimos 7 días de telemetry
-    #     start = "1970-01-01T00:00:00Z"
-    #     stop = (datetime.utcnow() + timedelta(days=1)).isoformat() + "Z"
-    #     delete_api.delete(start, stop, '_measurement="telemetry"', 
-    #                       bucket=INFLUX_BUCKET, org=INFLUX_ORG)
-    #     
-    #     results["influxdb"] = {"status": "success", "message": "Telemetry data deleted"}
-    # except Exception as e:
-    #     results["influxdb"] = {"status": "error", "message": str(e)}
+    # 3. InfluxDB cleanup - Borrar todos los datos anteriores
+    try:
+        from influxdb_client import InfluxDBClient
+        from influxdb_client.client.delete_api import DeleteApi
+        
+        client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
+        delete_api = client.delete_api()
+        
+        # Borrar TODOS los datos (desde 1970 hasta mañana)
+        start = "1970-01-01T00:00:00Z"
+        stop = (datetime.utcnow() + timedelta(days=1)).isoformat() + "Z"
+        
+        # Borrar measurement: telemetry (predicciones, valores reales, pesos)
+        delete_api.delete(start, stop, '_measurement="telemetry"', 
+                          bucket=INFLUX_BUCKET, org=INFLUX_ORG)
+        
+        # Borrar measurement: chosen_model (modelo elegido por el selector)
+        delete_api.delete(start, stop, '_measurement="chosen_model"', 
+                          bucket=INFLUX_BUCKET, org=INFLUX_ORG)
+        
+        # Borrar measurement: chosen_error (errores del modelo elegido)
+        delete_api.delete(start, stop, '_measurement="chosen_error"', 
+                          bucket=INFLUX_BUCKET, org=INFLUX_ORG)
+        
+        client.close()
+        results["influxdb"] = {"status": "success", "message": "All historical data deleted from InfluxDB"}
+    except Exception as e:
+        results["influxdb"] = {"status": "error", "message": str(e)}
     
     # Determinar status global
     all_success = (
         results["collector"]["status"] == "success" and
-        results["agent"]["status"] == "success"
+        results["agent"]["status"] == "success" and
+        results["influxdb"]["status"] == "success"
     )
     
     return {
         "status": "success" if all_success else "partial",
         "timestamp": datetime.utcnow().isoformat(),
         "details": results,
-        "message": "Sistema reseteado. Listo para nuevo experimento." if all_success else "Reseteo parcial. Revisa detalles."
+        "message": "Sistema completamente reseteado. Listo para nuevo experimento." if all_success else "Reseteo parcial. Revisa detalles."
     }
 
 
@@ -1216,4 +1246,248 @@ def delete_scenario_endpoint(scenario_name: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error deleting scenario: {e}")
+
+
+@app.post("/api/analyze_report/{id}")
+async def analyze_report(id: str):
+    """
+    Analiza el reporte exportado usando IA (Groq) con acceso completo al CSV
+    para proporcionar un análisis profundo y accionable.
+    """
+    try:
+        from groq import Groq
+        import csv
+        import os
+        
+        # Configurar Groq API
+        api_key = os.getenv("GROQ_API_KEY")
+        
+        if not api_key:
+            raise HTTPException(
+                status_code=500, 
+                detail="GROQ_API_KEY not configured. Get free API key at: https://console.groq.com/keys"
+            )
+        
+        # Leer el CSV exportado completo
+        csv_path = f"/app/data/weights_history_{id}.csv"
+        
+        if not os.path.exists(csv_path):
+            raise HTTPException(
+                status_code=404,
+                detail=f"No export found for series '{id}'. Please export the report first."
+            )
+        
+        # Leer CSV y extraer información clave
+        csv_data = []
+        with open(csv_path, 'r') as f:
+            reader = csv.DictReader(f)
+            csv_data = list(reader)
+        
+        if not csv_data:
+            raise HTTPException(status_code=404, detail="CSV file is empty")
+        
+        # Analizar estructura de datos
+        total_points = len(csv_data)
+        first_row = csv_data[0]
+        last_row = csv_data[-1]
+        
+        # Extraer columnas de modelos (weight_*)
+        model_names = [col.replace('weight_', '') for col in first_row.keys() if col.startswith('weight_')]
+        
+        # Calcular estadísticas finales de cada modelo
+        model_stats = {}
+        for model in model_names:
+            weights = []
+            predictions = []
+            
+            for row in csv_data:
+                try:
+                    w = float(row.get(f'weight_{model}', 0))
+                    weights.append(w)
+                    
+                    pred = float(row.get(f'pred_{model}', 0))
+                    predictions.append(pred)
+                except (ValueError, TypeError):
+                    continue
+            
+            if weights:
+                model_stats[model] = {
+                    "weight_initial": round(weights[0], 4),
+                    "weight_final": round(weights[-1], 4),
+                    "weight_mean": round(sum(weights) / len(weights), 4),
+                    "weight_max": round(max(weights), 4),
+                    "weight_min": round(min(weights), 4),
+                    "prediction_final": round(predictions[-1], 4) if predictions else 0
+                }
+        
+        # Obtener valores reales y predicción ensemble
+        real_values = [float(row.get('var', 0)) for row in csv_data if row.get('var')]
+        ensemble_predictions = [float(row.get('prediction', 0)) for row in csv_data if row.get('prediction')]
+        
+        # Calcular error del ensemble (MAE y MAPE)
+        ensemble_errors = []
+        ensemble_ape = []
+        for i in range(min(len(real_values), len(ensemble_predictions))):
+            err = abs(ensemble_predictions[i] - real_values[i])
+            ensemble_errors.append(err)
+            
+            # MAPE
+            if real_values[i] != 0:
+                ape = abs(err / real_values[i])
+                ensemble_ape.append(ape)
+        
+        ensemble_mae = sum(ensemble_errors) / len(ensemble_errors) if ensemble_errors else 0
+        ensemble_mape = (sum(ensemble_ape) / len(ensemble_ape) * 100) if ensemble_ape else 0
+        
+        # Calcular MAE y MAPE por modelo
+        for model in model_names:
+            preds = [float(row.get(f'pred_{model}', 0)) for row in csv_data]
+            reals = [float(row.get('var', 0)) for row in csv_data]
+            
+            mae_list = []
+            mape_list = []
+            for i in range(min(len(preds), len(reals))):
+                err = abs(preds[i] - reals[i])
+                mae_list.append(err)
+                if reals[i] != 0:
+                    mape_list.append(abs(err / reals[i]))
+            
+            if model in model_stats:
+                model_stats[model]['mae'] = round(sum(mae_list) / len(mae_list), 4) if mae_list else 0
+                model_stats[model]['mape'] = round((sum(mape_list) / len(mape_list) * 100), 2) if mape_list else 0
+        
+        # Identificar tendencias de pesos
+        weight_evolution = {}
+        for model in model_names:
+            weights = [float(row.get(f'weight_{model}', 0)) for row in csv_data]
+            if len(weights) > 10:
+                # Comparar primer 25% vs último 25%
+                first_quarter = sum(weights[:len(weights)//4]) / (len(weights)//4)
+                last_quarter = sum(weights[-len(weights)//4:]) / (len(weights)//4)
+                trend = "📈 Increasing" if last_quarter > first_quarter * 1.2 else "📉 Decreasing" if last_quarter < first_quarter * 0.8 else "➡️ Stable"
+                weight_evolution[model] = trend
+        
+        # Construir prompt detallado con TODOS los datos
+        csv_sample = "\n".join([
+            f"Point {i+1}: real={row.get('var', 'N/A')}, ensemble_pred={row.get('prediction', 'N/A')}, chosen_model={row.get('chosen_model', 'N/A')}"
+            for i, row in enumerate(csv_data[:5])  # Primeros 5 puntos como muestra
+        ])
+        
+        csv_sample += "\n...\n"
+        csv_sample += "\n".join([
+            f"Point {len(csv_data)-4+i}: real={row.get('var', 'N/A')}, ensemble_pred={row.get('prediction', 'N/A')}, chosen_model={row.get('chosen_model', 'N/A')}"
+            for i, row in enumerate(csv_data[-5:])  # Últimos 5 puntos
+        ])
+        
+        prompt = f"""You are an expert analyst in adaptive prediction systems and ensemble learning.
+
+SYSTEM CONTEXT:
+This is a SOFT ensemble prediction system combining 6 different models:
+- **linear**: Simple linear regression
+- **poly**: Polynomial regression (degree 2)
+- **alphabeta**: Alpha-Beta filter (trend tracking)
+- **kalman**: Kalman filter (Bayesian optimal)
+- **base**: Naive model (last observed value)
+- **hyper**: Adaptive moving average
+
+The system adjusts model WEIGHTS in real-time based on recent performance.
+Final prediction: prediction = Σ(weight_i × pred_i)
+
+EXPERIMENT DATA:
+Total processed points: {total_points}
+Ensemble MAE: {round(ensemble_mae, 6)}
+Ensemble MAPE: {round(ensemble_mape, 2)}%
+
+MODEL STATISTICS:
+{chr(10).join([f"**{model}**:" + chr(10) + 
+               f"  - MAE: {stats.get('mae', 'N/A')}" + chr(10) +
+               f"  - MAPE: {stats.get('mape', 'N/A')}%" + chr(10) +
+               f"  - Initial weight: {stats['weight_initial']}" + chr(10) +
+               f"  - Final weight: {stats['weight_final']}" + chr(10) +
+               f"  - Average weight: {stats['weight_mean']}" + chr(10) +
+               f"  - Weight range: [{stats['weight_min']}, {stats['weight_max']}]" + chr(10) +
+               f"  - Trend: {weight_evolution.get(model, 'N/A')}" + chr(10) +
+               f"  - Final prediction: {stats['prediction_final']}"
+               for model, stats in sorted(model_stats.items(), key=lambda x: x[1]['weight_final'], reverse=True)])}
+
+DATA SAMPLE (first and last points):
+{csv_sample}
+
+REQUIRED ANALYSIS:
+Provide a DEEP and INSIGHTFUL analysis in Markdown format with the following sections:
+
+## 🎯 Executive Summary
+Concise description of overall system performance (2-3 lines).
+
+## 📊 Model Performance Analysis
+
+### 🥇 Top Performers
+Identify the 2-3 best models and explain:
+- Why they have high weights
+- What time series characteristics favor these models
+- When they are most effective
+
+### 📉 Weak Models
+Identify underperforming models and explain:
+- Why they have low or negative weights
+- What patterns they CANNOT capture
+- Analysis of their contribution to the ensemble
+
+## 🔄 Weight Evolution
+
+Analyze how weights changed during the experiment:
+- Which models gained confidence?
+- Which models lost it?
+- What does this indicate about the data nature?
+
+## 💡 Technical Insights
+
+- **Ensemble Stability**: Did weights converge or continue oscillating?
+- **Model Diversity**: Does the system use multiple models or depend on one?
+- **Prediction Quality**: Is the MAE/MAPE acceptable for the domain?
+- **Error Distribution**: Are errors consistent or do they vary significantly?
+
+FORMAT:
+- Use rich Markdown with headers (##, ###)
+- Include relevant emojis
+- Be specific and quantitative
+- Avoid generalities
+- Length: 600-900 words
+- Tone: Professional but accessible
+- Language: ENGLISH
+
+IMPORTANT! Base your analysis on the REAL DATA provided, not generic assumptions."""
+
+        # Llamar a Groq API
+        client = Groq(api_key=api_key)
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": "You are an expert data scientist in time series forecasting, ensemble methods, and adaptive systems. You provide deep, quantitative analysis based on actual data."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=3000,
+            temperature=0.6,
+        )
+        
+        analysis = response.choices[0].message.content
+        
+        return {
+            "success": True,
+            "analysis": analysis,
+            "series_id": id,
+            "total_points": total_points,
+            "ensemble_mae": round(ensemble_mae, 6),
+            "model_stats": model_stats,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+            
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Export file not found. Please export the report first using the 'Export Report' button."
+        )
+    except Exception as e:
+        logger.error(f"Error in AI analysis: {e}")
+        raise HTTPException(status_code=500, detail=f"AI analysis error: {str(e)}")
 

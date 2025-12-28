@@ -153,6 +153,7 @@ services:
       - LOADER_URL=http://window_loader:8083/trigger
       - COLLECTOR_URL=http://window_collector:8082/reset
       - COLLECTOR_FLUSH=http://window_collector:8082/flush
+      - GROQ_API_KEY=${GROQ_API_KEY}
     restart: always
 
 volumes:

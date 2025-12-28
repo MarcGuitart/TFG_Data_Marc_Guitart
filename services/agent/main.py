@@ -160,6 +160,7 @@ def reset_hypermodel(unit_id: str):
     - Limpia historial de predicciones
     - Resetea contadores
     - Resetea buffers de modelos base (para reproducibilidad)
+    - Limpia buffer de observaciones
     
     Útil para empezar experimentos desde cero sin acumulación de memoria previa.
     """
@@ -170,20 +171,29 @@ def reset_hypermodel(unit_id: str):
     # Reset completo (incluye modelos base)
     hm.reset_complete()
     
-    log.info(f"[reset] HyperModel reseteado completamente para {unit_id}")
+    # Limpiar buffer de observaciones
+    if unit_id in buffers_by_id:
+        buffers_by_id[unit_id].clear()
+    
+    # Limpiar última predicción
+    if unit_id in last_pred_by_id:
+        del last_pred_by_id[unit_id]
+    
+    log.info(f"[reset] HyperModel, buffer y predicciones reseteados completamente para {unit_id}")
     
     return {
         "status": "reset",
         "unit_id": unit_id,
         "weights": dict(hm.w),
         "history_length": len(hm._history),
-        "message": f"HyperModel {unit_id} reiniciado a estado inicial (incluye buffers de modelos base)"
+        "buffer_length": len(buffers_by_id.get(unit_id, [])),
+        "message": f"HyperModel {unit_id} reiniciado a estado inicial (pesos, historial, buffers de observaciones)"
     }
 
 @app.post("/api/reset_all")
 def reset_all_hypermodels():
     """
-    Resetea TODOS los HyperModels activos.
+    Resetea TODOS los HyperModels activos y sus buffers de observaciones.
     Útil para limpiar completamente el sistema antes de un nuevo experimento.
     """
     reset_count = 0
@@ -193,15 +203,23 @@ def reset_all_hypermodels():
         # Reset completo (incluye modelos base)
         hm.reset_complete()
         
+        # Limpiar buffer de observaciones
+        if unit_id in buffers_by_id:
+            buffers_by_id[unit_id].clear()
+        
+        # Limpiar última predicción
+        if unit_id in last_pred_by_id:
+            del last_pred_by_id[unit_id]
+        
         reset_count += 1
         unit_ids.append(unit_id)
-        log.info(f"[reset_all] HyperModel reseteado completamente para {unit_id}")
+        log.info(f"[reset_all] HyperModel, buffer y predicciones reseteados completamente para {unit_id}")
     
     return {
         "status": "reset_all",
         "reset_count": reset_count,
         "unit_ids": unit_ids,
-        "message": f"{reset_count} HyperModels reiniciados completamente"
+        "message": f"{reset_count} HyperModels reiniciados completamente (pesos, historial, buffers de observaciones)"
     }
 
 # === CLIENTES Influx ===

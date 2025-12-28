@@ -5,3 +5,4 @@ aiofiles
 httpx
 python-dotenv
 influxdb-client
+groq

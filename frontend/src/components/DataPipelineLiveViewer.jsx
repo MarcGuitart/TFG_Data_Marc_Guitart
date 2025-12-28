@@ -528,7 +528,7 @@ const chartData = selectedId
                           </tbody>
                         </table>
                       </div>
-                      <div style={{ marginTop: 8, fontSize: 11, color: "#666" }}>
+                      <div style={{ marginTop: 8, fontSize: 11, color: "#ffffffff" }}>
                         Mostrando últimos 20 puntos · Total: {backendSeries.chosen_models.length}
                       </div>
                     </div>
@@ -610,7 +610,7 @@ const chartData = selectedId
                                   <li>Los pesos pueden ser negativos para crear contraste real</li>
                                   <li>Los modelos con pesos más altos han demostrado mejor rendimiento histórico</li>
                                 </ul>
-                                <div style={{ marginTop: 12, fontSize: 11, color: "#666" }}>
+                                <div style={{ marginTop: 12, fontSize: 11, color: "#ffffffff" }}>
                                   <strong>Últimos pesos:</strong> {
                                     Object.entries(backendSeries.weights).map(([model, series]) => {
                                       const lastWeight = series[series.length - 1]?.weight || 0;
@@ -630,7 +630,7 @@ const chartData = selectedId
                               </div>
                             </div>
                           ) : (
-                            <div style={{ color: "#666", fontSize: 12 }}>
+                            <div style={{ color: "#ffffffff", fontSize: 12 }}>
                               No hay datos de pesos disponibles
                             </div>
                           );

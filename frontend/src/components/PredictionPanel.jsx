@@ -5,6 +5,8 @@ import AP1GlobalChart from "./AP1GlobalChart";
 import AP1VerificationTable from "./AP1VerificationTable";
 import AP2SelectorTable from "./AP2SelectorTable";
 import AP4MetricsTable from "./AP4MetricsTable";
+import ConfidenceEvolutionChart from "./ConfidenceEvolutionChart";
+import { MODEL_COLORS } from "../constants/models";
 
 const API_BASE = "http://localhost:8081";
 const DEFAULT_HOURS = 24;
@@ -13,9 +15,8 @@ const FULL_HOURS = 999; // Para obtener todos los datos disponibles
 const TABS = {
   DEMO: "demo",
   GLOBAL_STATS: "global_stats",
-  AP1_GLOBAL: "ap1_global",
-  AP2_SELECTOR: "ap2_selector",
-  AP4_METRICS: "ap4_metrics",
+  MODELS_RANKING: "models_ranking",
+  CONFIDENCE_EVOLUTION: "confidence_evolution",
   AP1_ZOOM: "ap1_zoom",
   VERIFY: "verify",
 };
@@ -197,10 +198,9 @@ const PredictionPanel = forwardRef((props, ref) => {
 
   const tabButtons = [
     { id: TABS.DEMO, label: "🎯 Demo", icon: "presentation" },
-    { id: TABS.GLOBAL_STATS, label: "🌐 Complete Global View", icon: "analytics" },
-    { id: TABS.AP2_SELECTOR, label: "📋 Table Selector", icon: "list" },
-    { id: TABS.AP4_METRICS, label: "🏆 Ranking Models", icon: "medal" },
-    { id: TABS.AP1_GLOBAL, label: "📊 Global View", icon: "globe" },
+    { id: TABS.GLOBAL_STATS, label: "📊 Complete Analysis", icon: "analytics" },
+    { id: TABS.MODELS_RANKING, label: "🏆 Models Ranking", icon: "medal" },
+    { id: TABS.CONFIDENCE_EVOLUTION, label: "� Confidence Evolution", icon: "trending-up" },
     { id: TABS.AP1_ZOOM, label: "🔍 Zoom Detail", icon: "zoom", hidden: true },
     { id: TABS.VERIFY, label: "✓ Verification", icon: "check", hidden: true },
   ];
@@ -451,15 +451,11 @@ const PredictionPanel = forwardRef((props, ref) => {
             />
           )}
 
-          {activeTab === TABS.AP1_GLOBAL && (
-            <AP1GlobalChart data={points} />
+          {activeTab === TABS.CONFIDENCE_EVOLUTION && (
+            <ConfidenceEvolutionChart data={points} />
           )}
 
-          {activeTab === TABS.AP2_SELECTOR && (
-            <AP2SelectorTable data={selectorData} maxRows={500} />
-          )}
-
-          {activeTab === TABS.AP4_METRICS && (
+          {activeTab === TABS.MODELS_RANKING && (
             <AP4MetricsTable data={metricsData} />
           )}
 
