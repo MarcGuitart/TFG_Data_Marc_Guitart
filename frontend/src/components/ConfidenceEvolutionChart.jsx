@@ -61,9 +61,7 @@ const ConfidenceEvolutionChart = ({ data }) => {
       }
     });
 
-  // No visual smoothing by default — keep the true cumulative accuracy values.
-  // (We removed the smoothed line to avoid duplicating information in the chart.)
-  return processed;
+    return processed;
   }, [data]);
 
   // Calculate statistics
@@ -108,7 +106,7 @@ const ConfidenceEvolutionChart = ({ data }) => {
           <div style={{ color: "#60a5fa", marginBottom: 4 }}>
             <strong>Point Accuracy:</strong> {data.pointAccuracy}%
           </div>
-          <div style={{ color: "#10b981", marginBottom: 4 }}>
+          <div style={{ color: "#10b981", marginBottom: 0 }}>
             <strong>Cumulative Accuracy:</strong> {data.cumulativeAccuracy}%
           </div>
         </div>
@@ -249,7 +247,7 @@ const ConfidenceEvolutionChart = ({ data }) => {
       {/* Chart */}
       <div style={{ background: "#1a1a1a", padding: 16, borderRadius: 6, border: "1px solid #333" }}>
         <ResponsiveContainer width="100%" height={400}>
-          <ComposedChart data={processedData} margin={{ top: 10, right: 30, left: 0, bottom: 24 }}>
+          <ComposedChart data={processedData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
             <defs>
               <linearGradient id="excellentZone" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="#10b981" stopOpacity={0.3} />
@@ -265,7 +263,7 @@ const ConfidenceEvolutionChart = ({ data }) => {
               dataKey="index"
               stroke="#ffffff"
               tick={{ fill: "#ffffff" }}
-              label={{ value: "Data Points", position: "insideBottom", offset: -5, fill: "#ffffff" }}
+              label={{ value: "Data Points", position: "insideBottomRight", offset: -15, fill: "#ffffff" }}
             />
             <YAxis
               stroke="#ffffff"
@@ -276,7 +274,7 @@ const ConfidenceEvolutionChart = ({ data }) => {
               ticks={[0, 25, 50, 75, 100]}
             />
             <Tooltip content={<CustomTooltip />} />
-            <Legend verticalAlign="top" align="right" wrapperStyle={{ color: "#ffffff", paddingBottom: 8 }} />
+            <Legend wrapperStyle={{ color: "#ffffff" }} verticalAlign="top" height={36} />
 
             {/* Confidence Bands */}
             <ReferenceLine y={85} stroke="#10b981" strokeDasharray="5 5" strokeWidth={2} />
@@ -294,11 +292,11 @@ const ConfidenceEvolutionChart = ({ data }) => {
             />
             <Line
               type="monotone"
-              dataKey="cumulativeAccuracySmoothed"
+              dataKey="cumulativeAccuracy"
               stroke="#10b981"
               strokeWidth={3}
               dot={false}
-              name="Cumulative Accuracy (Smoothed)"
+              name="Cumulative Accuracy"
             />
           </ComposedChart>
         </ResponsiveContainer>
