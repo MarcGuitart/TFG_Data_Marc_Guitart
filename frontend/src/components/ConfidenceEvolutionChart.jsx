@@ -61,23 +61,9 @@ const ConfidenceEvolutionChart = ({ data }) => {
       }
     });
 
-    // Apply smoothing to cumulative accuracy using a 5-point moving average
-    // This reduces visual abruptness when single points have very low accuracy
-    const smoothingWindow = Math.min(5, Math.ceil(processed.length / 10));
-    if (processed.length > 1 && smoothingWindow > 1) {
-      for (let i = 0; i < processed.length; i++) {
-        const start = Math.max(0, i - Math.floor(smoothingWindow / 2));
-        const end = Math.min(processed.length, i + Math.floor(smoothingWindow / 2) + 1);
-        const window = processed.slice(start, end);
-        const smoothedAccuracy = window.reduce((sum, p) => sum + p.cumulativeAccuracy, 0) / window.length;
-        processed[i].cumulativeAccuracySmoothed = parseFloat(smoothedAccuracy.toFixed(2));
-      }
-    } else {
-      // If not enough data points for smoothing, use original values
-      processed.forEach(p => p.cumulativeAccuracySmoothed = p.cumulativeAccuracy);
-    }
-
-    return processed;
+  // No visual smoothing by default — keep the true cumulative accuracy values.
+  // (We removed the smoothed line to avoid duplicating information in the chart.)
+  return processed;
   }, [data]);
 
   // Calculate statistics
@@ -87,19 +73,19 @@ const ConfidenceEvolutionChart = ({ data }) => {
     const firstHalf = processedData.slice(0, Math.floor(processedData.length / 2));
     const secondHalf = processedData.slice(Math.floor(processedData.length / 2));
 
-    const avgFirst = firstHalf.reduce((sum, p) => sum + p.cumulativeAccuracySmoothed, 0) / firstHalf.length;
-    const avgSecond = secondHalf.reduce((sum, p) => sum + p.cumulativeAccuracySmoothed, 0) / secondHalf.length;
+    const avgFirst = firstHalf.reduce((sum, p) => sum + p.cumulativeAccuracy, 0) / firstHalf.length;
+    const avgSecond = secondHalf.reduce((sum, p) => sum + p.cumulativeAccuracy, 0) / secondHalf.length;
     const trend = avgSecond - avgFirst;
 
     const final = processedData[processedData.length - 1];
     const initial = processedData[0];
 
     return {
-      initial: initial.cumulativeAccuracySmoothed,
-      final: final.cumulativeAccuracySmoothed,
+      initial: initial.cumulativeAccuracy,
+      final: final.cumulativeAccuracy,
       trend: trend,
-      improvement: final.cumulativeAccuracySmoothed - initial.cumulativeAccuracySmoothed,
-      avgAccuracy: processedData.reduce((sum, p) => sum + p.cumulativeAccuracySmoothed, 0) / processedData.length,
+      improvement: final.cumulativeAccuracy - initial.cumulativeAccuracy,
+      avgAccuracy: processedData.reduce((sum, p) => sum + p.cumulativeAccuracy, 0) / processedData.length,
     };
   }, [processedData]);
 
@@ -124,9 +110,6 @@ const ConfidenceEvolutionChart = ({ data }) => {
           </div>
           <div style={{ color: "#10b981", marginBottom: 4 }}>
             <strong>Cumulative Accuracy:</strong> {data.cumulativeAccuracy}%
-          </div>
-          <div style={{ color: "#8b5cf6", marginBottom: 0, fontSize: 11, opacity: 0.8 }}>
-            <strong>Smoothed Accuracy:</strong> {data.cumulativeAccuracySmoothed}%
           </div>
         </div>
       );
@@ -266,7 +249,7 @@ const ConfidenceEvolutionChart = ({ data }) => {
       {/* Chart */}
       <div style={{ background: "#1a1a1a", padding: 16, borderRadius: 6, border: "1px solid #333" }}>
         <ResponsiveContainer width="100%" height={400}>
-          <ComposedChart data={processedData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+          <ComposedChart data={processedData} margin={{ top: 10, right: 30, left: 0, bottom: 24 }}>
             <defs>
               <linearGradient id="excellentZone" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="#10b981" stopOpacity={0.3} />
@@ -293,7 +276,7 @@ const ConfidenceEvolutionChart = ({ data }) => {
               ticks={[0, 25, 50, 75, 100]}
             />
             <Tooltip content={<CustomTooltip />} />
-            <Legend wrapperStyle={{ color: "#ffffff" }} />
+            <Legend verticalAlign="top" align="right" wrapperStyle={{ color: "#ffffff", paddingBottom: 8 }} />
 
             {/* Confidence Bands */}
             <ReferenceLine y={85} stroke="#10b981" strokeDasharray="5 5" strokeWidth={2} />

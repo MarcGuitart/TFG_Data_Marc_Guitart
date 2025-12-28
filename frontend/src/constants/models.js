@@ -13,11 +13,11 @@ export const MODEL_COLORS = {
   // Modelos principales
   linear: "#3b82f6",      // azul
   poly: "#10b981",        // verde esmeralda
-  alphabeta: "#f59e0b",   // naranja/amber
+  alphabeta: "#ffea00ff",   // naranja/amber
   kalman: "#412f69ff",    // violeta
   
   // Modelo baseline
-  base: "#837171ff",      // gris (naive/persistencia)
+  base: "#c22727ff",      // gris (naive/persistencia)
   
   // Predicción final y valor real
   var: "#00A3FF",         // azul claro (tráfico real)
@@ -30,10 +30,10 @@ export const MODEL_NAMES = {
   poly: "Polynomial Regression",
   alphabeta: "Alpha-Beta Filter",
   kalman: "Kalman Filter",
-  base: "Naive (Persistence)",
+  base: "Naive",
   var: "Real Traffic",
   prediction: "Adaptive Ensemble",
 };
 
 // Colores por defecto (fallback)
-export const DEFAULT_MODEL_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#412f69ff", "#837171ff", "#ec4899"];
+export const DEFAULT_MODEL_COLORS = ["#3b82f6", "#10b981", "#ffea00ff", "#412f69ff", "#c22727ff", "#ec4899"];
