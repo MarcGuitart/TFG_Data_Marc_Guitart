@@ -263,7 +263,7 @@ const ConfidenceEvolutionChart = ({ data }) => {
       {/* Chart */}
       <div style={{ background: "#1a1a1a", padding: 16, borderRadius: 6, border: "1px solid #333" }}>
         <ResponsiveContainer width="100%" height={400}>
-          <ComposedChart data={processedData} margin={{ top: 10, right: 30, left: 60, bottom: 60 }}>
+          <ComposedChart data={processedData} margin={{ top: 10, right: 30, left: 60, bottom: 80 }}>
             <defs>
               <linearGradient id="excellentZone" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="#10b981" stopOpacity={0.3} />
@@ -290,7 +290,7 @@ const ConfidenceEvolutionChart = ({ data }) => {
               ticks={[0, 25, 50, 75, 100]}
             />
             <Tooltip content={<CustomTooltip />} />
-            <Legend wrapperStyle={{ color: "#ffffff", paddingTop: "20px" }} verticalAlign="bottom" height={36} />
+            <Legend wrapperStyle={{ color: "#ffffff", paddingTop: "30px" }} verticalAlign="bottom" height={36} />
 
             {/* Confidence Bands */}
             <ReferenceLine y={85} stroke="#10b981" strokeDasharray="5 5" strokeWidth={2} />
