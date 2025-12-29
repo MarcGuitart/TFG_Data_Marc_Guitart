@@ -3,7 +3,7 @@
  */
 
 // Lista de modelos predictivos activos (5 modelos)
-export const KNOWN_MODELS = ["linear", "poly", "alphabeta", "kalman", "base"];
+export const KNOWN_MODELS = ["linear", "poly", "alphabeta", "kalman", "naive"];
 
 // Todos los modelos incluidos en visualización
 export const ALL_MODELS = KNOWN_MODELS;
@@ -17,7 +17,7 @@ export const MODEL_COLORS = {
   kalman: "#412f69ff",    // violeta
   
   // Modelo baseline
-  base: "#c22727ff",      // gris (naive/persistencia)
+  naive: "#c22727ff",      // gris (naive/persistencia)
   
   // Predicción final y valor real
   var: "#00A3FF",         // azul claro (tráfico real)
@@ -30,7 +30,7 @@ export const MODEL_NAMES = {
   poly: "Polynomial Regression",
   alphabeta: "Alpha-Beta Filter",
   kalman: "Kalman Filter",
-  base: "Naive",
+  naive: "Naive",
   var: "Real Traffic",
   prediction: "Adaptive Ensemble",
 };

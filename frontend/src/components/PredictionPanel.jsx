@@ -44,6 +44,12 @@ const PredictionPanel = forwardRef((props, ref) => {
   const [zoomStartIdx, setZoomStartIdx] = useState(0);
   const [viewMode, setViewMode] = useState("demo"); // "demo" (1h) o "full" (todos los datos)
 
+  // Helper: Map model names for display (e.g., "base" -> "naive")
+  const displayModelName = (modelName) => {
+    const mapping = { "base": "naive" };
+    return mapping[modelName] || modelName;
+  };
+
   // Exponer método refreshData para que App.jsx pueda llamarlo
   useImperativeHandle(ref, () => ({
     refreshData: () => {
@@ -414,7 +420,9 @@ const PredictionPanel = forwardRef((props, ref) => {
                 {(() => {
                   const modelCounts = {};
                   points.forEach(p => {
-                    const m = p.chosen_model;
+                    let m = p.chosen_model;
+                    // Map "base" to "naive" for display
+                    m = displayModelName(m);
                     if (m) modelCounts[m] = (modelCounts[m] || 0) + 1;
                   });
                   const total = Object.values(modelCounts).reduce((a, b) => a + b, 0);
@@ -433,7 +441,8 @@ const PredictionPanel = forwardRef((props, ref) => {
                                     background: model === "linear" ? "#3b82f6" : 
                                                model === "poly" ? "#10b981" : 
                                                model === "alphabeta" ? "#f59e0b" : 
-                                               model === "kalman" ? "#8b5cf6" : "#6b7280",
+                                               model === "kalman" ? "#8b5cf6" :
+                                               model === "naive" ? "#6b7280" : "#6b7280",
                                     height: "100%",
                                     borderRadius: 4,
                                     width: `${pct}%`,
