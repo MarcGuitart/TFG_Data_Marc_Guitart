@@ -1,0 +1,194 @@
+/* AnalysisModal.css - Estilos para el modal de análisis avanzado */
+
+.analysis-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease-in;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.analysis-modal {
+  background: #1a1a1a;
+  border: 2px solid #333;
+  border-radius: 8px;
+  width: 90%;
+  max-width: 1200px;
+  height: 80vh;
+  max-height: 800px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.analysis-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  border-bottom: 1px solid #333;
+  background: linear-gradient(135deg, #222 0%, #1a1a1a 100%);
+}
+
+.analysis-modal-header h2 {
+  color: #fff;
+  margin: 0;
+  font-size: 18px;
+}
+
+.analysis-modal-body {
+  display: grid;
+  grid-template-columns: 1fr 0.7fr 1.8fr;
+  gap: 16px;
+  padding: 16px;
+  flex: 1;
+  overflow: hidden;
+}
+
+.analysis-panel {
+  background: #0a0a0a;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.analysis-panel h3 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  color: #FF7A00;
+}
+
+.analysis-panel > div:not(:first-child) {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.drag-drop-zone {
+  border: 2px dashed #666;
+  border-radius: 4px;
+  padding: 32px 12px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: rgba(0, 0, 0, 0.3);
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.drag-drop-zone:hover {
+  border-color: #FF7A00;
+  background: rgba(255, 122, 0, 0.05);
+}
+
+.drag-drop-zone.active {
+  border-color: #FF7A00;
+  background: rgba(255, 122, 0, 0.1);
+}
+
+.drag-drop-zone.active > * {
+  color: #FF7A00 !important;
+}
+
+.analysis-modal-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-top: 1px solid #333;
+  background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
+}
+
+.analysis-modal-footer button {
+  transition: all 0.2s ease;
+}
+
+.analysis-modal-footer button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(255, 122, 0, 0.3);
+}
+
+/* Scrollbar styling */
+.analysis-modal-body > div {
+  scrollbar-width: thin;
+  scrollbar-color: #666 #2a2a2a;
+}
+
+.analysis-modal-body > div::-webkit-scrollbar {
+  width: 8px;
+}
+
+.analysis-modal-body > div::-webkit-scrollbar-track {
+  background: #2a2a2a;
+  border-radius: 4px;
+}
+
+.analysis-modal-body > div::-webkit-scrollbar-thumb {
+  background: #666;
+  border-radius: 4px;
+}
+
+.analysis-modal-body > div::-webkit-scrollbar-thumb:hover {
+  background: #888;
+}
+
+/* Responsive */
+@media (max-width: 1024px) {
+  .analysis-modal {
+    max-width: 95vw;
+    height: 90vh;
+  }
+
+  .analysis-modal-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .analysis-modal {
+    max-width: 98vw;
+    height: 95vh;
+    border-radius: 4px;
+  }
+
+  .analysis-modal-body {
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .analysis-panel {
+    padding: 8px;
+  }
+}

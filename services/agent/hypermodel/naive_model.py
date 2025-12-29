@@ -10,7 +10,7 @@ class NaiveModel(BaseModel):
     Predictor naive (baseline): retorna el último valor observado.
     Asume que el futuro = presente (modelo de persistencia).
     """
-    def __init__(self, name: str = "base", **kwargs):
+    def __init__(self, name: str = "naive", **kwargs):
         super().__init__(name, **kwargs)
     
     def predict(self, series: Sequence[float]) -> float:

@@ -16,6 +16,7 @@ import {
   Lightbulb,
   X as CloseIcon
 } from 'lucide-react';
+import AnalysisModal from "./AnalysisModal";
 import "./ControlHeader.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8081";
@@ -28,6 +29,7 @@ export default function ControlHeader({ onIdsUpdate }) {
   const [resetting, setResetting] = useState(false);
   const [message, setMessage] = useState("");
   const [analysisResult, setAnalysisResult] = useState(null);
+  const [showAnalysisModal, setShowAnalysisModal] = useState(false);
 
   // Upload CSV
   const handleUpload = async (e) => {
@@ -139,37 +141,9 @@ export default function ControlHeader({ onIdsUpdate }) {
     }
   };
 
-  // Analyze Report with AI
-  const handleAnalyze = async () => {
-    setAnalyzing(true);
-    setMessage("Analyzing data with AI...");
-    setAnalysisResult(null);
-
-    try {
-      const currentId = window.localStorage.getItem('currentSeriesId') || "Other";
-      
-      // Llamar al endpoint del backend que hará el análisis con IA
-      const res = await fetch(`${API_BASE}/api/analyze_report/${currentId}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      });
-
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.detail || `HTTP ${res.status}`);
-      }
-
-      const data = await res.json();
-      setAnalysisResult(data.analysis);
-      setMessage("success:Analysis completed");
-    } catch (err) {
-      setMessage(`error:Analysis error: ${err.message}`);
-      console.error("Analysis error:", err);
-    } finally {
-      setAnalyzing(false);
-    }
+  // Analyze Report with AI - Open modal for advanced analysis
+  const handleAnalyze = () => {
+    setShowAnalysisModal(true);
   };
 
   // Reset System (limpiar pesos e historial)
@@ -538,6 +512,13 @@ export default function ControlHeader({ onIdsUpdate }) {
           </div>
         </div>
       )}
+
+      {/* Advanced Analysis Modal */}
+      <AnalysisModal
+        isOpen={showAnalysisModal}
+        onClose={() => setShowAnalysisModal(false)}
+        currentId={window.localStorage.getItem('currentSeriesId') || "Other"}
+      />
     </div>
   );
 }

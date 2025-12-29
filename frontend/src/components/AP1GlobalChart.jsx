@@ -5,11 +5,11 @@ import {
 import { MODEL_COLORS, MODEL_NAMES, KNOWN_MODELS } from "../constants/models";
 
 /**
- * AP1: Gráfica GLOBAL de toda la serie con Real + Adaptativo + Todos los modelos.
- * Muestra "visión general del rendimiento" en todo el periodo.
+ * AP1: Global chart of entire series with Real + Adaptive + All models.
+ * Shows "overall performance view" across the entire period.
  * 
  * Props:
- * - data: array de puntos con {t, var, prediction, linear, poly, alphabeta, kalman, base}
+ * - data: array of points with {t, var, prediction, linear, poly, alphabeta, kalman, naive}
  */
 export default function AP1GlobalChart({ data = [] }) {
   const processedData = useMemo(() => {
@@ -24,10 +24,12 @@ export default function AP1GlobalChart({ data = [] }) {
           prediction: Number.isFinite(d?.prediction) ? d.prediction : undefined,
         };
         
-        // Añadir todos los modelos conocidos dinámicamente
+        // Add all known models dynamically
+        // Map "base" to "naive" if backend sends it
         KNOWN_MODELS.forEach(model => {
-          if (Number.isFinite(d?.[model])) {
-            point[model] = d[model];
+          const dataKey = model === "naive" && d?.base ? "base" : model;
+          if (Number.isFinite(d?.[dataKey])) {
+            point[model] = d[dataKey];
           }
         });
         
@@ -47,7 +49,7 @@ export default function AP1GlobalChart({ data = [] }) {
   if (!processedData.length) {
     return (
       <div style={{ width: "100%", height: 350, color: "#ccc", display: "flex", alignItems: "center" }}>
-        <p style={{ margin: "auto" }}>(no hay datos para mostrar)</p>
+        <p style={{ margin: "auto" }}>(no data to display)</p>
       </div>
     );
   }
@@ -56,6 +58,7 @@ export default function AP1GlobalChart({ data = [] }) {
     <div style={{ width: "100%", marginBottom: 20 }}>
       <h3>Global View of the Complete Series</h3>
       <p style={{ fontSize: 12, color: "#ffffffff" }}>
+        Real traffic (blue) vs Adaptive ensemble prediction (orange) and individual model predictions (semi-transparent)
       </p>
 
       <div style={{ width: "100%", height: 350 }}>
@@ -91,7 +94,7 @@ export default function AP1GlobalChart({ data = [] }) {
               connectNulls
             />
 
-            {/* Adaptive Model (principal, más gruesa) */}
+            {/* Adaptive Model (main, thicker line) */}
             <Line
               type="monotone"
               dataKey="prediction"
@@ -102,7 +105,7 @@ export default function AP1GlobalChart({ data = [] }) {
               connectNulls
             />
 
-            {/* Modelos individuales (líneas finas semi-transparentes) */}
+            {/* Individual models (thin semi-transparent lines) */}
             {KNOWN_MODELS.map((modelName) => (
               <Line
                 key={modelName}

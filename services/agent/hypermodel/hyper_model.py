@@ -15,7 +15,7 @@ MODEL_REGISTRY = {
     "poly": PolyModel,
     "alphabeta": AlphaBetaModel,
     "kalman": KalmanModel,
-    "base": NaiveModel,
+    "naive": NaiveModel,
     "hyper": MovingAverageModel,
     "moving_average": MovingAverageModel,
 }
@@ -479,6 +479,16 @@ class HyperModel:
         """
         AP3: Exporta el historial completo a CSV para análisis en Excel.
         
+        Estructura de columnas (por fila):
+        1. TEMPORAL: step, ts
+        2. REAL: y_real
+        3. PREDICCIONES: y_{model} para cada modelo
+        4. ERRORES ABSOLUTOS: err_{model} para cada modelo
+        5. ERRORES RELATIVOS: err_rel_{model} para cada modelo
+        6. WEIGHTS ACTUALES: w_{model} para cada modelo (DESPUÉS del update)
+        7. RANKING: rank_{model} para cada modelo
+        8. DECISIÓN: chosen_by_error (modelo seleccionado)
+        
         Args:
             filepath: Ruta del archivo CSV a crear
             
@@ -492,8 +502,53 @@ class HyperModel:
             # Asegurar directorio existe
             os.makedirs(os.path.dirname(filepath) if os.path.dirname(filepath) else ".", exist_ok=True)
             
-            # Obtener todas las columnas de la primera entrada
-            fieldnames = list(self._history[0].keys())
+            # Extraer nombres de modelos de la primera entrada
+            first_entry = self._history[0]
+            model_names = [k.replace("y_", "") for k in first_entry.keys() if k.startswith("y_") and k != "y_real"]
+            
+            # Construir orden de columnas: temporal → real → predicciones → errores → pesos → ranking → decisión
+            fieldnames = [
+                # 1. TEMPORAL
+                "step", "ts",
+                # 2. REAL
+                "y_real",
+            ]
+            
+            # 3. PREDICCIONES por modelo
+            for model in model_names:
+                fieldnames.append(f"y_{model}")
+            
+            # 4. ERRORES ABSOLUTOS por modelo
+            for model in model_names:
+                fieldnames.append(f"err_{model}")
+            
+            # 5. ERRORES RELATIVOS por modelo (%)
+            for model in model_names:
+                fieldnames.append(f"err_rel_{model}")
+            
+            # 6. WEIGHTS ACTUALES por modelo (pesos DESPUÉS del update)
+            for model in model_names:
+                fieldnames.append(f"w_{model}")
+            
+            # 7. RANKING por modelo (1 = mejor, N = peor)
+            for model in model_names:
+                fieldnames.append(f"rank_{model}")
+            
+            # 8. DECISIÓN: modelo elegido por error mínimo (chosen by error)
+            fieldnames.append("chosen_by_error")
+            
+            # Campos opcionales que pueden estar en el historial
+            optional_fields = ["total_reward", "choices_differ", "chosen_by_weight", "decay_share"]
+            for field in optional_fields:
+                if field in first_entry and field not in fieldnames:
+                    fieldnames.append(field)
+            
+            # Agregar campos pre-pesos y rewards si existen
+            for model in model_names:
+                if f"w_pre_{model}" in first_entry and f"w_pre_{model}" not in fieldnames:
+                    fieldnames.append(f"w_pre_{model}")
+                if f"reward_{model}" in first_entry and f"reward_{model}" not in fieldnames:
+                    fieldnames.append(f"reward_{model}")
             
             with open(filepath, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -501,7 +556,8 @@ class HyperModel:
                 for entry in self._history:
                     # Redondear floats para legibilidad
                     row = {}
-                    for k, v in entry.items():
+                    for k in fieldnames:
+                        v = entry.get(k)
                         if isinstance(v, float):
                             row[k] = round(v, 6)
                         else:

@@ -9,7 +9,7 @@ import { Lightbulb } from 'lucide-react';
  * Weight Evolution Chart: Muestra cómo evolucionan los pesos de los 5 modelos activos
  * 
  * Props:
- * - data: array de puntos con {t, weight_linear, weight_poly, weight_alphabeta, weight_kalman, weight_base}
+ * - data: array de puntos con {t, weight_linear, weight_poly, weight_alphabeta, weight_kalman, weight_naive}
  */
 export default function WeightEvolutionChart({ data = [] }) {
   const processedData = useMemo(() => {
@@ -25,7 +25,7 @@ export default function WeightEvolutionChart({ data = [] }) {
           weight_poly: Number.isFinite(d?.weight_poly) ? d.weight_poly : 0,
           weight_alphabeta: Number.isFinite(d?.weight_alphabeta) ? d.weight_alphabeta : 0,
           weight_kalman: Number.isFinite(d?.weight_kalman) ? d.weight_kalman : 0,
-          weight_base: Number.isFinite(d?.weight_base) ? d.weight_base : 0,
+          weight_naive: Number.isFinite(d?.weight_naive) ? d.weight_naive : 0,
         };
       })
       .filter((d) => d && d.x);
@@ -49,7 +49,7 @@ export default function WeightEvolutionChart({ data = [] }) {
 
   // Calcular estadísticas de dominancia
   const dominanceStats = useMemo(() => {
-    const models = ["linear", "poly", "alphabeta", "kalman", "base"]; // 5 modelos activos
+    const models = ["linear", "poly", "alphabeta", "kalman", "naive"]; // 5 modelos activos
     const counts = {};
     models.forEach(m => counts[m] = 0);    processedData.forEach(point => {
       let maxWeight = -Infinity;
@@ -140,9 +140,9 @@ export default function WeightEvolutionChart({ data = [] }) {
                 <stop offset="5%" stopColor={MODEL_COLORS.kalman} stopOpacity={0.8}/>
                 <stop offset="95%" stopColor={MODEL_COLORS.kalman} stopOpacity={0.3}/>
               </linearGradient>
-              <linearGradient id="colorBase" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor={MODEL_COLORS.base} stopOpacity={0.8}/>
-                <stop offset="95%" stopColor={MODEL_COLORS.base} stopOpacity={0.3}/>
+              <linearGradient id="colorNaive" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor={MODEL_COLORS.naive} stopOpacity={0.8}/>
+                <stop offset="95%" stopColor={MODEL_COLORS.naive} stopOpacity={0.3}/>
               </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
@@ -211,11 +211,11 @@ export default function WeightEvolutionChart({ data = [] }) {
             />
             <Area
               type="monotone"
-              dataKey="weight_base"
+              dataKey="weight_naive"
               stackId="1"
-              stroke={MODEL_COLORS.base}
-              fill="url(#colorBase)"
-              name="weight_base"
+              stroke={MODEL_COLORS.naive}
+              fill="url(#colorNaive)"
+              name="weight_naive"
             />
           </AreaChart>
         </ResponsiveContainer>

@@ -229,7 +229,7 @@ const PredictionPanel = forwardRef((props, ref) => {
   return (
     <div style={{ color: "white", padding: "16px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <h2 style={{ margin: 0 }}> Sistema de Predicción Adaptativa</h2>
+        <h2 style={{ margin: 0 }}> Adaptive Telemetry Predictor </h2>
       </div>
 
       <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 12, padding: "8px", backgroundColor: "#222", borderRadius: 4, display: "flex", justifyContent: "space-between", alignItems: "center" }}>

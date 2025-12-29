@@ -90,7 +90,7 @@ export default function LivePredictionChart({ selectedId, isRunning }) {
           linear: point.hyper_models?.linear || null,
           poly: point.hyper_models?.poly || null,
           alphabeta: point.hyper_models?.alphabeta || null,
-          base: point.hyper_models?.base || null,
+          naive: point.hyper_models?.naive || null,
           error: error,
           chosen: point.chosen_model || "-",
           errorAbs: point.chosen_error_abs || null,
