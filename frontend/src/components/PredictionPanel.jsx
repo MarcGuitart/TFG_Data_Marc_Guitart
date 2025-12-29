@@ -33,6 +33,7 @@ const TABS = {
 };
 
 const PredictionPanel = forwardRef((props, ref) => {
+  const { onAnalyticsDataUpdate } = props;
   const [currentId, setCurrentId] = useState("");
   const [points, setPoints] = useState([]);
   const [selectorData, setSelectorData] = useState([]);
@@ -185,6 +186,28 @@ const PredictionPanel = forwardRef((props, ref) => {
       cancel = true;
     };
   }, [currentId, refreshKey, viewMode]);
+
+  // Notificar a App.jsx sobre cambios en analyticsData (para AnalysisModal)
+  useEffect(() => {
+    if (onAnalyticsDataUpdate) {
+      // En modo demo, filtrar points a las últimas 24h
+      let demoPointsData = points;
+      if (viewMode === "demo") {
+        const now = Date.now();
+        const oneDayAgo = now - 24 * 60 * 60 * 1000;
+        demoPointsData = points.filter(p => {
+          const t = p.t ? new Date(p.t).getTime() : 0;
+          return t >= oneDayAgo;
+        });
+      }
+
+      onAnalyticsDataUpdate({
+        selectorData,
+        viewMode,
+        demoPoints: demoPointsData,
+      });
+    }
+  }, [selectorData, viewMode, points, onAnalyticsDataUpdate]);
 
   const info = useMemo(() => {
     if (!points.length) return { nObs: 0, nPred: 0, nModels: 0, confidence: 0 };

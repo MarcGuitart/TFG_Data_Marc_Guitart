@@ -21,7 +21,7 @@ import "./ControlHeader.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8081";
 
-export default function ControlHeader({ onIdsUpdate }) {
+export default function ControlHeader({ onIdsUpdate, analyticsData = {} }) {
   const [uploading, setUploading] = useState(false);
   const [running, setRunning] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -518,6 +518,9 @@ export default function ControlHeader({ onIdsUpdate }) {
         isOpen={showAnalysisModal}
         onClose={() => setShowAnalysisModal(false)}
         currentId={window.localStorage.getItem('currentSeriesId') || "Other"}
+        selectorData={analyticsData.selectorData || []}
+        viewMode={analyticsData.viewMode || "full"}
+        demoPoints={analyticsData.demoPoints || []}
       />
     </div>
   );

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useMemo } from "react";
 import {
   Upload,
   FileText,
@@ -11,9 +11,11 @@ import {
   BarChart3,
   TrendingUp,
   Zap,
+  Table as TableIcon,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import AP2SelectorTable from "./AP2SelectorTable";
 import "./AnalysisModal.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8081";
@@ -23,8 +25,16 @@ const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8081";
  * - Preview del pipeline report
  * - Drag & drop para cargar Export Report (CSV con weights históricos)
  * - Botón para enviar a IA con contexto enriquecido
+ * - Tabla Adaptativa del Selector (cuando en modo Demo, muestra solo puntos visibles)
  */
-export default function AnalysisModal({ isOpen, onClose, currentId = "Other" }) {
+export default function AnalysisModal({ 
+  isOpen, 
+  onClose, 
+  currentId = "Other",
+  selectorData = [],
+  viewMode = "full", // "demo" (24h) o "full" (todos)
+  demoPoints = []    // puntos visibles en modo demo
+}) {
   const [pipelineReport, setPipelineReport] = useState(null);
   const [exportReport, setExportReport] = useState(null);
   const [exportFileName, setExportFileName] = useState("");
@@ -33,6 +43,27 @@ export default function AnalysisModal({ isOpen, onClose, currentId = "Other" }) 
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef(null);
   const [loadingReport, setLoadingReport] = useState(false);
+
+  // Filtrar datos del selector según viewMode
+  const filteredSelectorData = useMemo(() => {
+    if (viewMode === "demo" && demoPoints.length > 0) {
+      // Obtener rango de timestamps de los puntos demo
+      const demoTimestamps = new Set();
+      demoPoints.forEach(p => {
+        if (p.t) {
+          demoTimestamps.add(new Date(p.t).getTime());
+        }
+      });
+
+      // Filtrar selector data que coincida con timestamps demo
+      return selectorData.filter(row => {
+        const rowTime = new Date(row.t || row.t_ms).getTime();
+        return demoTimestamps.has(rowTime);
+      });
+    }
+    // En modo full, mostrar todos los datos
+    return selectorData;
+  }, [selectorData, viewMode, demoPoints]);
 
   // Cargar pipeline report al abrir modal
   React.useEffect(() => {
@@ -404,6 +435,35 @@ export default function AnalysisModal({ isOpen, onClose, currentId = "Other" }) 
             )}
           </div>
         </div>
+
+        {/* Adaptive Selector Table Section (when in Demo Mode) */}
+        {viewMode === "demo" && filteredSelectorData.length > 0 && (
+          <div
+            style={{
+              borderTop: "1px solid #333",
+              padding: "16px",
+              background: "#0a0a0a",
+              maxHeight: "300px",
+              overflowY: "auto",
+            }}
+          >
+            <h3
+              style={{
+                color: "#FF7A00",
+                marginTop: 0,
+                marginBottom: "12px",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                fontSize: "14px",
+              }}
+            >
+              <TableIcon size={16} />
+              Adaptive Selector Table (Visible Points Only)
+            </h3>
+            <AP2SelectorTable data={filteredSelectorData} maxRows={9999} />
+          </div>
+        )}
 
         {/* Footer */}
         <div className="analysis-modal-footer">
