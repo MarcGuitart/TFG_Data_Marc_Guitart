@@ -13,8 +13,17 @@ class NaiveModel(BaseModel):
     def __init__(self, name: str = "naive", **kwargs):
         super().__init__(name, **kwargs)
     
-    def predict(self, series: Sequence[float]) -> float:
-        """Retorna el último valor de la serie, o 0 si está vacía"""
+    def predict(self, series: Sequence[float], horizon: int = 1) -> float:
+        """
+        Naive prediction (repeat last value)
+        
+        Args:
+            series: Historical values
+            horizon: Steps ahead (ignored for naive - always returns last value)
+            
+        Returns:
+            Last observed value (persistence model)
+        """
         if not series:
             return 0.0
         return float(series[-1])

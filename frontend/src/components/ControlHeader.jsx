@@ -30,6 +30,10 @@ export default function ControlHeader({ onIdsUpdate, analyticsData = {} }) {
   const [message, setMessage] = useState("");
   const [analysisResult, setAnalysisResult] = useState(null);
   const [showAnalysisModal, setShowAnalysisModal] = useState(false);
+  
+  // Forecast Horizon state
+  const [forecastHorizon, setForecastHorizon] = useState(1);
+  const [customHorizon, setCustomHorizon] = useState("");
 
   // Upload CSV
   const handleUpload = async (e) => {
@@ -69,7 +73,7 @@ export default function ControlHeader({ onIdsUpdate, analyticsData = {} }) {
     setMessage("Running pipeline...");
 
     try {
-      const res = await fetch(`${API_BASE}/api/run_window`, {
+      const res = await fetch(`${API_BASE}/api/run_window?forecast_horizon=${forecastHorizon}`, {
         method: "POST",
       });
 
@@ -81,9 +85,10 @@ export default function ControlHeader({ onIdsUpdate, analyticsData = {} }) {
       const rows = data.loader_response?.rows || data.rows_flushed || 0;
       const uniqueIds = data.loader_response?.unique_ids || [];
       
-      setMessage(`success:Pipeline executed: ${rows} rows processed`);
+      setMessage(`success:Pipeline executed: ${rows} rows processed (Forecast Horizon: T+${forecastHorizon})`);
       console.log("Run response:", data);
       console.log("IDs detectados:", uniqueIds);
+      console.log("Forecast Horizon:", forecastHorizon);
 
       // Emitir evento con el primer ID detectado
       if (uniqueIds.length > 0) {
@@ -193,6 +198,135 @@ export default function ControlHeader({ onIdsUpdate, analyticsData = {} }) {
           <Target size={24} />
           Control Panel
         </h2>
+      </div>
+
+      {/* Forecast Horizon Selector */}
+      <div className="control-section" style={{ 
+        background: 'linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%)', 
+        padding: '16px', 
+        borderRadius: '8px',
+        border: '2px solid #FF7A00',
+        marginBottom: '16px'
+      }}>
+        <h3 style={{ 
+          margin: '0 0 12px 0', 
+          fontSize: '14px', 
+          fontWeight: '600',
+          color: '#FF7A00',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px'
+        }}>
+          <Target size={18} />
+          Forecast Horizon (T+M)
+        </h3>
+        
+        <div style={{ fontSize: '11px', color: '#999', marginBottom: '12px' }}>
+          Select how many steps ahead to predict (T+M where M = forecast horizon)
+        </div>
+
+        {/* Preset Buttons */}
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
+          {[1, 2, 3, 5, 10, 20, 30, 60].map(h => (
+            <button
+              key={h}
+              onClick={() => {
+                setForecastHorizon(h);
+                setCustomHorizon("");
+              }}
+              disabled={uploading || running}
+              className={forecastHorizon === h ? 'btn-active' : 'btn'}
+              style={{
+                padding: '6px 12px',
+                fontSize: '12px',
+                background: forecastHorizon === h ? '#FF7A00' : '#333',
+                border: forecastHorizon === h ? '2px solid #FF7A00' : '1px solid #555',
+                borderRadius: '4px',
+                color: '#fff',
+                cursor: (uploading || running) ? 'not-allowed' : 'pointer',
+                fontWeight: forecastHorizon === h ? 'bold' : 'normal',
+                opacity: (uploading || running) ? 0.5 : 1,
+                transition: 'all 0.2s'
+              }}
+            >
+              T+{h}
+            </button>
+          ))}
+          
+          {/* Custom Input */}
+          <input
+            type="number"
+            min="1"
+            max="200"
+            placeholder="Custom"
+            value={customHorizon}
+            onChange={(e) => {
+              const val = parseInt(e.target.value);
+              setCustomHorizon(e.target.value);
+              if (val > 0 && val <= 200) {
+                setForecastHorizon(val);
+              }
+            }}
+            disabled={uploading || running}
+            style={{
+              width: '80px',
+              padding: '6px 8px',
+              fontSize: '12px',
+              background: '#333',
+              border: '1px solid #555',
+              borderRadius: '4px',
+              color: '#fff',
+              textAlign: 'center'
+            }}
+          />
+        </div>
+
+        {/* Info Display */}
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'space-between',
+          padding: '8px 12px',
+          background: '#1a1a1a',
+          borderRadius: '4px',
+          border: '1px solid #333'
+        }}>
+          <div style={{ fontSize: '11px', color: '#888' }}>
+            Selected Horizon:
+          </div>
+          <div style={{ 
+            fontSize: '14px', 
+            fontWeight: 'bold', 
+            color: '#FF7A00',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}>
+            T+{forecastHorizon}
+            <span style={{ fontSize: '10px', color: '#666' }}>
+              ({forecastHorizon * 30} minutes ahead)
+            </span>
+          </div>
+        </div>
+
+        {/* Warning for large horizons */}
+        {forecastHorizon > 30 && (
+          <div style={{ 
+            marginTop: '8px',
+            padding: '6px 10px',
+            background: '#3a2a1a',
+            border: '1px solid #f59e0b',
+            borderRadius: '4px',
+            fontSize: '10px',
+            color: '#f59e0b',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}>
+            <AlertTriangle size={12} />
+            Large horizons may have lower prediction confidence
+          </div>
+        )}
       </div>
 
       <div className="control-section">

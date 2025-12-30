@@ -49,7 +49,14 @@ class KalmanModel(BaseModel):
         I = np.eye(self.P.shape[0])
         self.P = (I - K @ self.H) @ P_pred
 
-    def predict(self, series):
+    def predict(self, series, horizon=1):
+        """
+        Kalman filter prediction with multi-horizon support
+        
+        Args:
+            series: Historical values
+            horizon: Steps ahead (1=T+1, 2=T+2, etc.)
+        """
         if not series:
             return 0.0
         # Re-filtra toda la ventana (simple y robusto para demo)
@@ -60,6 +67,6 @@ class KalmanModel(BaseModel):
         for z in series:
             self._step(z)
 
-        # Predicción a un paso vista: x_next = x + v*dt
+        # Multi-step prediction: x(t+h) = x(t) + v*dt*h
         x, v = float(self.x[0,0]), float(self.x[1,0])
-        return x + v * self.dt
+        return x + v * self.dt * horizon

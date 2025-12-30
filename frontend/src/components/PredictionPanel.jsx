@@ -44,6 +44,7 @@ const PredictionPanel = forwardRef((props, ref) => {
   const [activeTab, setActiveTab] = useState(TABS.DEMO);
   const [zoomStartIdx, setZoomStartIdx] = useState(0);
   const [viewMode, setViewMode] = useState("demo"); // "demo" (1h) o "full" (todos los datos)
+  const [forecastHorizon, setForecastHorizon] = useState(1); // Horizonte de predicción seleccionado
 
   // Helper: Map model names for display (e.g., "base" -> "naive")
   const displayModelName = (modelName) => {
@@ -80,6 +81,26 @@ const PredictionPanel = forwardRef((props, ref) => {
     };
   }, []);
 
+  // Fetch the selected forecast horizon
+  useEffect(() => {
+    const fetchHorizon = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/forecast_horizon`);
+        if (res.ok) {
+          const data = await res.json();
+          const horizon = data.forecast_horizon || 1;
+          setForecastHorizon(horizon);
+          console.log("[PredictionPanel] Fetched forecast horizon:", horizon);
+        }
+      } catch (err) {
+        console.error("[PredictionPanel] Error fetching forecast horizon:", err);
+      }
+    };
+
+    // Fetch on refresh or when tab changes
+    fetchHorizon();
+  }, [refreshKey]);
+
   // Fetch IDs disponibles al inicio (si no hay currentId)
   useEffect(() => {
     const fetchIds = async () => {
@@ -104,6 +125,25 @@ const PredictionPanel = forwardRef((props, ref) => {
     // Fetch IDs al montar y cada vez que refreshKey cambie
     fetchIds();
   }, [refreshKey]);
+
+  // Calculate T+M data for confidence evolution chart
+  const horizonDataForChart = useMemo(() => {
+    if (forecastHorizon <= 1 || points.length < forecastHorizon + 1) {
+      return [];
+    }
+    
+    const result = [];
+    for (let i = 0; i < points.length - forecastHorizon; i++) {
+      const pointT = points[i];
+      const pointTplusM = points[i + forecastHorizon];
+      
+      result.push({
+        actualAtTplusM: Number.isFinite(pointTplusM?.var) ? pointTplusM.var : undefined,
+        predictionAtT: Number.isFinite(pointT?.prediction) ? pointT.prediction : undefined,
+      });
+    }
+    return result;
+  }, [points, forecastHorizon]);
 
   // Fetch a /api/series y endpoints relacionados
   useEffect(() => {
@@ -353,7 +393,7 @@ const PredictionPanel = forwardRef((props, ref) => {
                   <Play size={20} />
                   Live Predictions
                 </h3>
-                <AP1GlobalChart data={points} />
+                <AP1GlobalChart data={points} forecastHorizon={forecastHorizon} />
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 24 }}>
@@ -494,7 +534,7 @@ const PredictionPanel = forwardRef((props, ref) => {
                   <TrendingUp size={18} />
                   Complete Series Visualization
                 </h4>
-                <AP1GlobalChart data={points} />
+                <AP1GlobalChart data={points} forecastHorizon={forecastHorizon} />
               </div>
 
               {/* Tabla completa con todos los puntos */}
@@ -527,7 +567,11 @@ const PredictionPanel = forwardRef((props, ref) => {
           )}
 
           {activeTab === TABS.CONFIDENCE_EVOLUTION && (
-            <ConfidenceEvolutionChart data={points} />
+            <ConfidenceEvolutionChart 
+              data={points} 
+              forecastHorizon={forecastHorizon}
+              horizonData={horizonDataForChart}
+            />
           )}
 
           {activeTab === TABS.MODELS_RANKING && (

@@ -43,6 +43,9 @@ router_metrics = APIRouter(prefix="/api/metrics", tags=["metrics"])
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger("metrics_debug")
 
+# Global state: store the last forecast horizon selected
+_last_forecast_horizon = {}  # {"forecast_horizon": 1, "timestamp": datetime}
+
 
 def _sanitize_numbers(o):
     """Recorre recursivamente dicts/listas y convierte NaN/Inf a None; convierte Decimals/numpy numbers a nativos."""
@@ -578,6 +581,196 @@ def _align_by_time(a: List[Dict[str, Any]], b: List[Dict[str, Any]], tol_seconds
     return res
 
 
+# ============================================================================
+# MULTI-HORIZON FORECAST ENDPOINT
+# ============================================================================
+@app.get("/api/forecast_multi_horizon")
+def get_multi_horizon_forecast(
+    id: str = Query(..., description="series id"),
+    hours: int = Query(24, ge=1, le=24*365, description="lookback window")
+):
+    """
+    Get the multi-horizon forecast for the LAST EXECUTED PIPELINE.
+    
+    This endpoint returns forecasts ONLY for the horizon that was selected
+    when the pipeline was executed (stored in _last_forecast_horizon).
+    
+    If no pipeline has been executed, or forecast_horizon wasn't set,
+    defaults to showing T+1.
+    
+    Returns:
+        JSON with:
+        - selected_horizon: the T+M that was executed
+        - predictions: array of {time_t, time_t_plus_h, ground_truth_t, ground_truth_t_plus_h, prediction_t, confidence, error_rel, error_abs}
+        - avg_confidence: average confidence for this horizon
+        - avg_error_rel: average relative error
+        - total_points: number of prediction points
+    """
+    global _last_forecast_horizon
+    
+    # Get the horizon from the last execution, default to 1
+    selected_horizon = _last_forecast_horizon.get("forecast_horizon", 1)
+    last_execution_time = _last_forecast_horizon.get("timestamp")
+    
+    logger.info(f"[MULTI_HORIZON] === Starting forecast for id={id}, horizon=T+{selected_horizon}, hours={hours} ===")
+    logger.info(f"[MULTI_HORIZON] Last execution: {last_execution_time}")
+    
+    try:
+        # 1) Get series data from the /api/series endpoint
+        logger.info(f"[MULTI_HORIZON] Step 1: Querying series data...")
+        
+        # Call the series endpoint directly
+        import httpx
+        try:
+            async_client = httpx.Client(timeout=30.0)
+            res = async_client.get(f"http://localhost:8081/api/series?id={id}&hours={hours}")
+            res.raise_for_status()
+            series_data = res.json()
+            async_client.close()
+        except Exception as e:
+            logger.error(f"[MULTI_HORIZON] Could not fetch series data: {e}")
+            return JSONResponse(content={
+                "id": id,
+                "selected_horizon": selected_horizon,
+                "predictions": [],
+                "error": f"Could not fetch series data: {str(e)}"
+            })
+        
+        # Extract points: each point has {"timestamp", "var" (ground truth), "prediction" or "y_adaptive"}
+        points = series_data.get("points", [])
+        if not points:
+            logger.warning(f"[MULTI_HORIZON] No points found for series {id}")
+            return JSONResponse(content={
+                "id": id,
+                "selected_horizon": selected_horizon,
+                "predictions": [],
+                "error": "No data points available for this series"
+            })
+        
+        logger.info(f"[MULTI_HORIZON] Step 1 complete: {len(points)} points fetched")
+        
+        # 2) Calculate forecast ONLY for the selected horizon
+        logger.info(f"[MULTI_HORIZON] Step 2: Calculating forecast for horizon T+{selected_horizon}...")
+        
+        # SLOT_MINUTES defines the timestep (typically 30 minutes)
+        SLOT_MINUTES = 30
+        
+        h = selected_horizon
+        predictions = []
+        confidence_scores = []
+        errors_rel = []
+        
+        # For each point, calculate what error would have been at horizon h
+        for i in range(len(points) - h):  # Only consider points where we have ground truth at T+h
+            current_point = points[i]
+            target_point = points[i + h]
+            
+            # Current values
+            time_current = current_point.get("timestamp")
+            var_current = current_point.get("var")  # Ground truth at T
+            pred_current = current_point.get("prediction") or current_point.get("y_adaptive")  # Ensemble prediction at T
+            
+            # Target values (at T+h)
+            time_target = target_point.get("timestamp")
+            var_target = target_point.get("var")  # Ground truth at T+h
+            pred_target = pred_current  # We use the prediction made at T for T+h (as proxy)
+            logger.info(f"[MULTI_HORIZON] === Processing horizon T+{h} ===")
+            
+            horizon_predictions = []
+            confidence_scores = []
+            errors_rel = []
+            
+            # For each point, calculate what error would have been at horizon h
+            for i in range(len(points) - h):  # Only consider points where we have ground truth at T+h
+                current_point = points[i]
+                target_point = points[i + h]
+                
+                # Current values
+                time_current = current_point.get("timestamp")
+                var_current = current_point.get("var")  # Ground truth at T
+                pred_current = current_point.get("prediction") or current_point.get("y_adaptive")  # Ensemble prediction at T
+                
+                # Target values (at T+h)
+                time_target = target_point.get("timestamp")
+                var_target = target_point.get("var")  # Ground truth at T+h
+                pred_target = pred_current  # We use the prediction made at T for T+h (as proxy)
+                
+                if var_target is None or pred_target is None:
+                    continue
+            
+            if var_target is None or pred_target is None:
+                continue
+            
+            # Calculate error metrics
+            error_abs = abs(pred_target - var_target)
+            error_rel = 0
+            confidence = 100
+            
+            if var_target != 0:
+                error_rel = (error_abs / abs(var_target)) * 100
+                confidence = max(0, min(100, 100 - error_rel))  # Bounded 0-100
+            
+            errors_rel.append(error_rel)
+            confidence_scores.append(confidence)
+            
+            # Record prediction
+            predictions.append({
+                "index": i,
+                "time_t": time_current,
+                "time_t_plus_h": time_target,
+                "ground_truth_t": var_current,
+                "ground_truth_t_plus_h": var_target,
+                "prediction_t": pred_current,
+                "error_abs": error_abs,
+                "error_rel": error_rel,
+                "confidence": confidence
+            })
+            
+            # Log first 3 points for verification
+            if i < 3:
+                var_str = f"{var_current:.4f}" if var_current is not None else "None"
+                pred_str = f"{pred_current:.4f}" if pred_current is not None else "None"
+                logger.info(f"[MULTI_HORIZON_VERIFY] H=T+{h}, Point index={i}:")
+                logger.info(f"  T: {time_current}, var={var_str}, pred={pred_str}")
+                logger.info(f"  T+{h}: {time_target}, var={var_target:.4f}")
+                logger.info(f"  Error: abs={error_abs:.4f}, rel={error_rel:.2f}%, conf={confidence:.2f}%")
+        
+        # Calculate horizon statistics
+        avg_confidence = None
+        avg_error_rel = None
+        
+        if confidence_scores:
+            avg_confidence = sum(confidence_scores) / len(confidence_scores)
+        
+        if errors_rel:
+            avg_error_rel = sum(errors_rel) / len(errors_rel)
+        
+        conf_str = f"{avg_confidence:.2f}" if avg_confidence is not None else "N/A"
+        err_str = f"{avg_error_rel:.2f}" if avg_error_rel is not None else "N/A"
+        logger.info(f"[MULTI_HORIZON] Horizon T+{h} complete: {len(predictions)} points, "
+                   f"avg_confidence={conf_str}%, avg_error={err_str}%")
+        
+        logger.info(f"[MULTI_HORIZON] === Forecast complete for horizon T+{selected_horizon} ===")
+        
+        return JSONResponse(content=_sanitize_numbers({
+            "id": id,
+            "selected_horizon": selected_horizon,
+            "predictions": predictions,
+            "avg_confidence": avg_confidence,
+            "avg_error_rel": avg_error_rel,
+            "total_points": len(predictions),
+            "lookback_hours": hours,
+            "slot_minutes": SLOT_MINUTES
+        }))
+        
+    except Exception as e:
+        logger.exception(f"[MULTI_HORIZON] ERROR calculating forecast for horizon T+{selected_horizon}: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e), "id": id, "selected_horizon": selected_horizon}
+        )
+
+
 
 @router_metrics.get("/combined")
 def metrics_combined(id: str = Query(..., description="series id"), start: str = Query("-7d")) -> Dict[str, Any]:
@@ -980,17 +1173,26 @@ def proxy_agent_export_csv(unit_id: str):
 # ============================================================================
 
 @app.post("/api/run_window")
-def run_window(source: str = Query("uploaded.csv"), speed_ms: int = Query(0)):
+def run_window(source: str = Query("uploaded.csv"), speed_ms: int = Query(0), forecast_horizon: int = Query(1, ge=1, le=200)):
     """
     Dispara el window_loader con un CSV específico.
     
     Parámetros (query):
       - source: nombre del archivo CSV en /app/data (default: uploaded.csv)
       - speed_ms: delay en ms entre mensajes (default: 0 = sin delay)
+      - forecast_horizon: horizonte de predicción seleccionado en frontend (T+N, default: 1)
     
-    Uso: POST /api/run_window?source=archivo.csv&speed_ms=100
+    Uso: POST /api/run_window?source=archivo.csv&speed_ms=100&forecast_horizon=10
     """
     import time
+    global _last_forecast_horizon
+    
+    logger.info(f"[orchestrator] run_window called: source={source}, speed_ms={speed_ms}, forecast_horizon={forecast_horizon}")
+    
+    # Save the forecast horizon for later use in multi-horizon endpoint
+    _last_forecast_horizon["forecast_horizon"] = forecast_horizon
+    _last_forecast_horizon["timestamp"] = datetime.now()
+    logger.info(f"[orchestrator] Saved forecast_horizon={forecast_horizon} for this execution")
     
     # 1) Reset collector
     try:
@@ -1015,13 +1217,25 @@ def run_window(source: str = Query("uploaded.csv"), speed_ms: int = Query(0)):
         r_trig.raise_for_status()
         data = r_trig.json() if r_trig.text else {}
         print(f"[orchestrator] Loader response: {data}")
-        return {"status": "success", "loader_response": data, "source": source}
+        return {"status": "success", "loader_response": data, "source": source, "forecast_horizon": forecast_horizon}
     except httpx.HTTPStatusError as e:
         print(f"[orchestrator] Loader HTTP error {e.response.status_code}: {e.response.text}")
         raise HTTPException(status_code=500, detail=f"loader trigger failed: {e.response.text}")
     except Exception as e:
         print(f"[orchestrator] Loader error: {e}")
         raise HTTPException(status_code=500, detail=f"loader trigger failed: {str(e)}")
+
+
+@app.get("/api/forecast_horizon")
+def get_forecast_horizon():
+    """
+    Retorna el horizonte de predicción guardado globalmente de la última ejecución.
+    """
+    global _last_forecast_horizon
+    return {
+        "forecast_horizon": _last_forecast_horizon.get("forecast_horizon", 1),
+        "timestamp": _last_forecast_horizon.get("timestamp")
+    }
 
 
 @app.post("/api/reset_system")

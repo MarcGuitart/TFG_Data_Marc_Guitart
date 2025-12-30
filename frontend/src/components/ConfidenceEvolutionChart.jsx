@@ -23,8 +23,13 @@ import { TrendingUp, TrendingDown, Info } from 'lucide-react';
  * - Cumulative accuracy (rolling average)
  * - Confidence bands (excellent ≥85%, acceptable 75-85%, low <75%)
  * - Trend to see if the system is improving or degrading
+ * 
+ * Props:
+ * - data: points with error_rel_mean (for T+1 standard)
+ * - forecastHorizon: T+M value
+ * - horizonData: points for T+M calculation (optional, from AP1GlobalChart)
  */
-const ConfidenceEvolutionChart = ({ data }) => {
+const ConfidenceEvolutionChart = ({ data, forecastHorizon = 1, horizonData = [] }) => {
   const processedData = useMemo(() => {
     if (!data || data.length === 0) return [];
 
@@ -80,9 +85,53 @@ const ConfidenceEvolutionChart = ({ data }) => {
     return processed;
   }, [data]);
 
+  // Calculate T+M confidence evolution data
+  const horizonProcessedData = useMemo(() => {
+    if (forecastHorizon <= 1 || !horizonData || horizonData.length === 0) return [];
+
+    const processed = [];
+
+    horizonData.forEach((point, idx) => {
+      // Calculate error for this T+M point
+      const actualAtTplusM = point.actualAtTplusM;
+      const predictionAtT = point.predictionAtT;
+      
+      if (Number.isFinite(actualAtTplusM) && Number.isFinite(predictionAtT)) {
+        const errorAbs = Math.abs(predictionAtT - actualAtTplusM);
+        const errorRel = (errorAbs / Math.abs(actualAtTplusM)) * 100;
+        const pointAccuracy = Math.max(0, Math.min(100, 100 - errorRel));
+
+        processed.push({
+          index: idx + 1,
+          pointAccuracy: parseFloat(pointAccuracy.toFixed(2)),
+        });
+      }
+    });
+
+    // Apply smoothing (moving average) to pointAccuracy
+    const smoothingWindow = Math.min(5, Math.ceil(processed.length / 10));
+    if (processed.length > 1 && smoothingWindow > 1) {
+      for (let i = 0; i < processed.length; i++) {
+        const start = Math.max(0, i - Math.floor(smoothingWindow / 2));
+        const end = Math.min(processed.length, i + Math.floor(smoothingWindow / 2) + 1);
+        const window = processed.slice(start, end);
+        const smoothedAccuracy = window.reduce((sum, p) => sum + p.pointAccuracy, 0) / window.length;
+        processed[i].movingAverageAccuracy = parseFloat(smoothedAccuracy.toFixed(2));
+      }
+    } else {
+      processed.forEach(p => p.movingAverageAccuracy = p.pointAccuracy);
+    }
+
+    return processed;
+  }, [forecastHorizon, horizonData]);
+
   // Calculate statistics
   const stats = useMemo(() => {
     if (processedData.length === 0) return null;
+
+    // Calculate average accuracy as mean of individual point accuracies (for consistency)
+    const pointAccuracies = processedData.map(p => p.pointAccuracy);
+    const avgAccuracyDirect = pointAccuracies.reduce((sum, acc) => sum + acc, 0) / pointAccuracies.length;
 
     const firstHalf = processedData.slice(0, Math.floor(processedData.length / 2));
     const secondHalf = processedData.slice(Math.floor(processedData.length / 2));
@@ -99,9 +148,37 @@ const ConfidenceEvolutionChart = ({ data }) => {
       final: final.cumulativeAccuracySmoothed,
       trend: trend,
       improvement: final.cumulativeAccuracySmoothed - initial.cumulativeAccuracySmoothed,
-      avgAccuracy: processedData.reduce((sum, p) => sum + p.cumulativeAccuracySmoothed, 0) / processedData.length,
+      avgAccuracy: avgAccuracyDirect, // Use direct average of point accuracies
     };
   }, [processedData]);
+
+  // Calculate statistics for T+M
+  const horizonStats = useMemo(() => {
+    if (horizonProcessedData.length === 0) return null;
+
+    // Calculate average accuracy as mean of individual point accuracies
+    // This matches how AP1GlobalChart calculates avgConfidence
+    const pointAccuracies = horizonProcessedData.map(p => p.pointAccuracy);
+    const avgAccuracyDirect = pointAccuracies.reduce((sum, acc) => sum + acc, 0) / pointAccuracies.length;
+
+    const firstHalf = horizonProcessedData.slice(0, Math.floor(horizonProcessedData.length / 2));
+    const secondHalf = horizonProcessedData.slice(Math.floor(horizonProcessedData.length / 2));
+
+    const avgFirst = firstHalf.reduce((sum, p) => sum + p.pointAccuracy, 0) / firstHalf.length;
+    const avgSecond = secondHalf.reduce((sum, p) => sum + p.pointAccuracy, 0) / secondHalf.length;
+    const trend = avgSecond - avgFirst;
+
+    const final = horizonProcessedData[horizonProcessedData.length - 1];
+    const initial = horizonProcessedData[0];
+
+    return {
+      initial: initial.pointAccuracy,
+      final: final.pointAccuracy,
+      trend: trend,
+      improvement: final.pointAccuracy - initial.pointAccuracy,
+      avgAccuracy: avgAccuracyDirect, // Use direct average of point accuracies
+    };
+  }, [horizonProcessedData]);
 
   const CustomTooltip = ({ active, payload }) => {
     if (active && payload && payload.length) {
@@ -361,6 +438,160 @@ const ConfidenceEvolutionChart = ({ data }) => {
           patterns. An upward trend shows the adaptive ensemble is improving over time.
         </div>
       </div>
+
+      {/* T+M Confidence Evolution Chart */}
+      {forecastHorizon > 1 && horizonProcessedData.length > 0 && (
+        <div style={{ marginTop: 40 }}>
+          <div style={{ marginBottom: 16 }}>
+            <h3 style={{ fontSize: 18, marginBottom: 8, color: "#fff", display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <TrendingUp size={22} />
+              Confidence Evolution for T+{forecastHorizon}
+            </h3>
+            <p style={{ fontSize: 13, color: "#aaa", marginBottom: 16 }}>
+              Shows the prediction confidence evolution for {forecastHorizon}-step ahead forecasting.
+              Compares actual values at T+{forecastHorizon} with predictions made at T.
+            </p>
+          </div>
+
+          {/* Statistics Cards for T+M */}
+          {horizonStats && (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                gap: 12,
+                marginBottom: 24,
+              }}
+            >
+              <div
+                style={{
+                  background: "#1a1a1a",
+                  padding: 16,
+                  borderRadius: 6,
+                  border: "1px solid #333",
+                }}
+              >
+                <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>
+                  Initial Accuracy (T+{forecastHorizon})
+                </div>
+                <div
+                  style={{
+                    fontSize: 24,
+                    fontWeight: "bold",
+                    color: horizonStats.initial >= 85 ? "#10b981" : horizonStats.initial >= 75 ? "#f59e0b" : "#ef4444",
+                  }}
+                >
+                  {horizonStats.initial.toFixed(2)}%
+                </div>
+              </div>
+
+              <div
+                style={{
+                  background: "#1a1a1a",
+                  padding: 16,
+                  borderRadius: 6,
+                  border: "1px solid #333",
+                }}
+              >
+                <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>
+                  Final Accuracy (T+{forecastHorizon})
+                </div>
+                <div
+                  style={{
+                    fontSize: 24,
+                    fontWeight: "bold",
+                    color: horizonStats.final >= 85 ? "#10b981" : horizonStats.final >= 75 ? "#f59e0b" : "#ef4444",
+                  }}
+                >
+                  {horizonStats.final.toFixed(2)}%
+                </div>
+              </div>
+
+              <div
+                style={{
+                  background: "#1a1a1a",
+                  padding: 16,
+                  borderRadius: 6,
+                  border: "1px solid #333",
+                }}
+              >
+                <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>
+                  Average Accuracy (T+{forecastHorizon})
+                </div>
+                <div
+                  style={{
+                    fontSize: 24,
+                    fontWeight: "bold",
+                    color: horizonStats.avgAccuracy >= 85 ? "#10b981" : horizonStats.avgAccuracy >= 75 ? "#f59e0b" : "#ef4444",
+                  }}
+                >
+                  {horizonStats.avgAccuracy.toFixed(2)}%
+                </div>
+              </div>
+
+              <div
+                style={{
+                  background: "#1a1a1a",
+                  padding: 16,
+                  borderRadius: 6,
+                  border: "1px solid #333",
+                }}
+              >
+                <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>
+                  Trend (T+{forecastHorizon})
+                </div>
+                <div
+                  style={{
+                    fontSize: 24,
+                    fontWeight: "bold",
+                    color: horizonStats.trend > 0 ? "#10b981" : horizonStats.trend < 0 ? "#ef4444" : "#999",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  {horizonStats.trend > 0 ? <TrendingUp size={18} /> : <TrendingDown size={18} />}
+                  {horizonStats.trend.toFixed(2)}%
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* T+M Chart */}
+          <div style={{ width: "100%", height: 350, marginBottom: 16 }}>
+            <ResponsiveContainer>
+              <ComposedChart data={horizonProcessedData} margin={{ top: 10, right: 30, bottom: 10, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
+                <XAxis dataKey="index" label={{ value: `Data Points (T+${forecastHorizon})`, position: "insideBottomRight", offset: -5 }} />
+                <YAxis domain={[0, 100]} label={{ value: "Accuracy (%)", angle: -90, position: "insideLeft" }} />
+                <Tooltip content={<CustomTooltip />} />
+                <Legend />
+
+                <ReferenceLine y={85} stroke="#10b981" strokeDasharray="3 3" label={{ value: "Excellent (85%)", position: "right", fill: "#10b981", fontSize: 11 }} />
+                <ReferenceLine y={75} stroke="#f59e0b" strokeDasharray="3 3" label={{ value: "Acceptable (75%)", position: "right", fill: "#f59e0b", fontSize: 11 }} />
+
+                <Line
+                  type="monotone"
+                  dataKey="pointAccuracy"
+                  stroke="#60a5fa"
+                  strokeWidth={1.5}
+                  dot={false}
+                  name={`Point Accuracy (T+${forecastHorizon})`}
+                  opacity={0.4}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="movingAverageAccuracy"
+                  stroke="#a78bfa"
+                  strokeWidth={3}
+                  dot={false}
+                  name={`Moving Average Accuracy (T+${forecastHorizon})`}
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

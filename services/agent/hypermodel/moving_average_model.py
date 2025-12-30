@@ -13,8 +13,17 @@ class MovingAverageModel(BaseModel):
         super().__init__(name, **kwargs)
         self.window = window
     
-    def predict(self, series: Sequence[float]) -> float:
-        """Retorna la media de los últimos window valores"""
+    def predict(self, series: Sequence[float], horizon: int = 1) -> float:
+        """
+        Moving average prediction
+        
+        Args:
+            series: Historical values
+            horizon: Steps ahead (ignored - always returns mean of window)
+            
+        Returns:
+            Mean of last window values
+        """
         if not series:
             return 0.0
         
