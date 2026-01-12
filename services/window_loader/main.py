@@ -82,7 +82,15 @@ def _normalize(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _emit_dataframe(df: pd.DataFrame, speed_ms: int = 0):
+def _emit_dataframe(df: pd.DataFrame, speed_ms: int = 0, forecast_horizon: int = 1):
+    """
+    Emit each row of the dataframe to Kafka.
+    
+    Args:
+        df: DataFrame with normalized data
+        speed_ms: Delay between messages in milliseconds
+        forecast_horizon: T+M prediction horizon (1=T+1, 5=T+5, etc.)
+    """
     prod = _producer()
     rows = df.to_dict(orient="records")
 
@@ -90,13 +98,16 @@ def _emit_dataframe(df: pd.DataFrame, speed_ms: int = 0):
     ids = sorted(set(r["id"] for r in rows))
     t0 = rows[0]["timestamp"] if rows else None
     t1 = rows[-1]["timestamp"] if rows else None
-    print(f"[loader] ids={ids}  rows={len(rows)}  window=[{t0} .. {t1}]  speed_ms={speed_ms}")
+    print(f"[loader] ids={ids}  rows={len(rows)}  window=[{t0} .. {t1}]  speed_ms={speed_ms}  forecast_horizon=T+{forecast_horizon}")
 
     # envío con flush periódico cada 50 mensajes para evitar pérdidas
     FLUSH_EVERY = 50
     
     if BATCH_SIZE <= 1:
         for i, r in enumerate(rows):
+            # Add forecast_horizon to each message so agent knows what horizon to use
+            r["forecast_horizon"] = forecast_horizon
+            
             prod.send(TOPIC_AGENT_IN, r)
             # copia normalizada opcional al topic RAW
             if TOPIC_RAW:
@@ -114,6 +125,9 @@ def _emit_dataframe(df: pd.DataFrame, speed_ms: int = 0):
         for i in range(0, len(rows), BATCH_SIZE):
             batch = rows[i:i+BATCH_SIZE]
             for r in batch:
+                # Add forecast_horizon to each message
+                r["forecast_horizon"] = forecast_horizon
+                
                 prod.send(TOPIC_AGENT_IN, r)
                 if TOPIC_RAW:
                     prod.send(TOPIC_RAW, r)
@@ -123,7 +137,7 @@ def _emit_dataframe(df: pd.DataFrame, speed_ms: int = 0):
 
     # Flush final para asegurar que todos los mensajes se envíen
     prod.flush()
-    print(f"[loader] ✅ flush final: {len(rows)} mensajes enviados")
+    print(f"[loader] ✅ flush final: {len(rows)} mensajes enviados con forecast_horizon=T+{forecast_horizon}")
     
     # Cerrar producer correctamente
     prod.close()
@@ -137,12 +151,16 @@ async def trigger_window_loader(payload: dict = {}):
       - source: nombre del fichero dentro de /app/data (obligatorio)
       - speed_ms: pacing opcional (ms entre mensajes) — override de PLAY_SPEED_MS
       - id_prefix: prefijo opcional para los ids (ej. 'unit-') para demos
+      - forecast_horizon: horizonte de predicción T+M (default: 1)
     """
     source = payload.get("source")
     if not source:
         raise HTTPException(status_code=400, detail="missing 'source'")
     speed_ms = int(payload.get("speed_ms", PLAY_SPEED_MS_DEFAULT))
     id_prefix = payload.get("id_prefix")
+    forecast_horizon = int(payload.get("forecast_horizon", 1))  # T+M horizon
+
+    print(f"[loader] forecast_horizon received: {forecast_horizon}")
 
     path = os.path.join(DATA_DIR, source)
     print(f"[loader] intentando abrir {path}")
@@ -154,7 +172,7 @@ async def trigger_window_loader(payload: dict = {}):
     if id_prefix:
         df["id"] = id_prefix + df["id"].astype(str)
 
-    _emit_dataframe(df, speed_ms=speed_ms)
+    _emit_dataframe(df, speed_ms=speed_ms, forecast_horizon=forecast_horizon)
 
     # persistimos la versión normalizada para inspección
     ext = ".csv" if (df.get("__src_format") == "csv").any() else ".parquet"

@@ -6,6 +6,8 @@ import MetricsPanel from "./MetricsPanel";
 import AP3WeightsPanel from "./AP3WeightsPanel";
 import LivePredictionChart from "./LivePredictionChart";
 
+// 2a evidencia de 7.11 de componente sin variable de entorno
+
 const API_BASE = "http://localhost:8081";
 const endpoints = null; 
 

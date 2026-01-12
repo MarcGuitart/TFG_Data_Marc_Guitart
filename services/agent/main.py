@@ -141,9 +141,12 @@ def get_model_stats(unit_id: str):
         "choices_diff": hm.get_choices_diff_count()
     }
 
+
+# Agent-side export handler showing filename and storage location
+
 @app.post("/api/export_csv/{unit_id}")
 def export_csv(unit_id: str):
-    """AP3: Exporta historial a CSV para análisis en Excel"""
+    """Export history to CSV for analysis in Excel"""
     hm = hyper_by_id.get(unit_id)
     if not hm:
         return {"error": f"No HyperModel for {unit_id}"}
@@ -155,14 +158,14 @@ def export_csv(unit_id: str):
 @app.post("/api/reset/{unit_id}")
 def reset_hypermodel(unit_id: str):
     """
-    Resetea el HyperModel de una unidad específica:
-    - Reinicia pesos a 0
-    - Limpia historial de predicciones
-    - Resetea contadores
-    - Resetea buffers de modelos base (para reproducibilidad)
-    - Limpia buffer de observaciones
-    
-    Útil para empezar experimentos desde cero sin acumulación de memoria previa.
+    Resets the HyperModel for a specific unit:
+    - Resets weights to 0
+    - Clears prediction history
+    - Resets counters
+    - Resets base model buffers (for reproducibility)
+    - Clears observation buffer
+
+    Useful for starting experiments from scratch without prior memory accumulation.
     """
     hm = hyper_by_id.get(unit_id)
     if not hm:
@@ -288,24 +291,24 @@ def auto_purge():
         try:
             enforce_cap_per_unit()
         except Exception as e:
-            log.error("error en auto-purge: %s", e)
+            log.error("Error en auto-purge: %s", e)
         time.sleep(300)
 
-# AP3: Exportación automática de historiales a CSV
+# Automatic exportation of histories to CSV
 CSV_EXPORT_PERIOD = int(os.getenv("CSV_EXPORT_PERIOD_SEC", "300"))  # cada 5 min
 
 def auto_export_csv():
-    """AP3: Exporta periódicamente los historiales a CSV para análisis offline"""
+    """Automatically exports histories to CSV for offline analysis"""
     while True:
         time.sleep(CSV_EXPORT_PERIOD)
         try:
             for unit_id, hm in list(hyper_by_id.items()):
-                if hm._history:  # Solo si hay datos
+                if hm._history:  # Only if there is data
                     filepath = f"/app/data/weights_history_{unit_id}.csv"
                     result = hm.export_history_csv(filepath)
-                    log.info("[AP3] CSV exportado: %s (%d steps)", result, len(hm._history))
+                    log.info("CSV exported: %s (%d steps)", result, len(hm._history))
         except Exception as e:
-            log.error("[AP3] Error exportando CSV: %s", e)
+            log.error("Error exporting CSV: %s", e)
 
 # === ESCRITURA TELEMETRÍA ===
 def write_timeseries(rec):
@@ -445,7 +448,7 @@ def main():
             unit = rec.get("unit_id") or rec.get("id") or "unknown"
             y_real = rec.get("var")
             base_ts = select_ts(rec.get("timestamp"))
-            ts_pred = base_ts + timedelta(minutes=PRED_HORIZON_MIN)
+            # ts_pred is calculated later after we know the horizon
 
             best_model = None
             ts_str = rec.get("timestamp") or base_ts.isoformat()
@@ -466,9 +469,22 @@ def main():
 
             # The evaluation block: y_true vs stored y_hat, score update, overwrite
 
+            # Get horizon from message (sent by loader) or fall back to env variable
+            # forecast_horizon from message is in SLOTS (1 = T+1, 5 = T+5)
+            msg_horizon = rec.get("forecast_horizon")
+            if msg_horizon is not None:
+                horizon_slots = max(1, int(msg_horizon))
+                horizon_minutes = horizon_slots * SLOT_MINUTES
+            else:
+                # Fall back to environment variable
+                horizon_slots = max(1, PRED_HORIZON_MIN // SLOT_MINUTES)
+                horizon_minutes = PRED_HORIZON_MIN
+
+            log.info(f"[horizon] Using horizon_slots={horizon_slots} (T+{horizon_slots}, {horizon_minutes} min)")
 
             hm = get_hyper_for(unit)
-            y_hat, preds_by_model = hm.predict(list(buf))
+            # Pass horizon to HyperModel so each model predicts T+M instead of T+1
+            y_hat, preds_by_model = hm.predict(list(buf), horizon=horizon_slots)
             weights = hm.export_state()
             chosen_model = hm.get_chosen_model()  # Chosen model
             last_errors = hm.get_last_errors()     # Last step absolute errors
@@ -476,21 +492,29 @@ def main():
             chosen_error = hm.get_chosen_error()   # Chosen model error
             last_pred_by_id[unit] = y_hat
 
-            log.info("[pred-ts] base=%s ts_pred=%s delta_min=%.1f",
-                base_ts.isoformat(), ts_pred.isoformat(),
+            # Calculate ts_pred based on the horizon
+            ts_pred = base_ts + timedelta(minutes=horizon_minutes)  # t + m
+            
+            log.info("[pred-ts] base=%s ts_pred=%s horizon=T+%d delta_min=%.1f",
+                base_ts.isoformat(), ts_pred.isoformat(), horizon_slots,
                 (ts_pred - base_ts).total_seconds()/60.0)
             
 
             # Preserving the horizon and writing the prediction
+            # KEY: Separamos semántica temporal:
+            # - t_decision (base_ts): momento en que se genera la predicción
+            # - t_target (ts_pred): momento futuro que se está prediciendo
+            # - horizon: número de slots adelante (m)
 
-            ts_pred = base_ts + timedelta(minutes=PRED_HORIZON_MIN)
             write_prediction(unit, ts_pred, y_hat)
 
             # 4) Publicamos mensaje enriquecido (compatible + telemetría HyperModel)
             enriched = dict(rec)
             enriched["yhat"] = float(y_hat)                  # COMPAT: collector la escribe en 'prediction'
-            enriched["ts_pred"] = ts_pred.strftime("%Y-%m-%d %H:%M:%S")
+            enriched["ts_pred"] = ts_pred.strftime("%Y-%m-%d %H:%M:%S")  # t + m (evaluation time)
+            enriched["ts_decision"] = base_ts.strftime("%Y-%m-%d %H:%M:%S")  # t (decision time)
             enriched["ts_influx"] = base_ts.strftime("%Y-%m-%d %H:%M:%S")  # Timestamp que usamos para InfluxDB
+            enriched["horizon"] = horizon_slots  # m (number of slots ahead)
             enriched["mode"] = FLAVOR
             if "timestamp" in enriched and "ts" not in enriched:
                 enriched["ts"] = enriched["timestamp"]

@@ -19,6 +19,7 @@ import {
 import AnalysisModal from "./AnalysisModal";
 import "./ControlHeader.css";
 
+
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8081";
 
 export default function ControlHeader({ onIdsUpdate, analyticsData = {} }) {

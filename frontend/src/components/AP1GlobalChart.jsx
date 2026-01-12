@@ -15,28 +15,40 @@ import { MODEL_COLORS, MODEL_NAMES, KNOWN_MODELS } from "../constants/models";
  */
 export default function AP1GlobalChart({ data = [], forecastHorizon = 1 }) {
   const processedData = useMemo(() => {
-    return (Array.isArray(data) ? data : [])
-      .map((d) => {
-        const x = d.x || (Number.isFinite(d?.t) ? new Date(d.t).toISOString().slice(0, 19) + "Z" : undefined);
-        if (!x) return null;
-
-        const point = {
-          x,
-          var: Number.isFinite(d?.var) ? d.var : undefined,
-          prediction: Number.isFinite(d?.prediction) ? d.prediction : undefined,
-        };
-        
-        // Add all known models dynamically
-        // Map "base" to "naive" if backend sends it
-        KNOWN_MODELS.forEach(model => {
-          const dataKey = model === "naive" && d?.base ? "base" : model;
-          if (Number.isFinite(d?.[dataKey])) {
-            point[model] = d[dataKey];
-          }
-        });
-        
-        return point;
-      })
+    const rawData = Array.isArray(data) ? data : [];
+    
+    // First pass: create a map with unique timestamps
+    const timestampMap = new Map();
+    
+    rawData.forEach((d) => {
+      const x = d.x || (Number.isFinite(d?.t) ? new Date(d.t).toISOString().slice(0, 19) + "Z" : undefined);
+      if (!x) return;
+      
+      if (!timestampMap.has(x)) {
+        timestampMap.set(x, { x });
+      }
+      
+      const point = timestampMap.get(x);
+      
+      // Merge var and prediction at the same timestamp
+      if (Number.isFinite(d?.var)) {
+        point.var = d.var;
+      }
+      if (Number.isFinite(d?.prediction)) {
+        point.prediction = d.prediction;
+      }
+      
+      // Add all known models dynamically
+      KNOWN_MODELS.forEach(model => {
+        const dataKey = model === "naive" && d?.base ? "base" : model;
+        if (Number.isFinite(d?.[dataKey])) {
+          point[model] = d[dataKey];
+        }
+      });
+    });
+    
+    // Second pass: convert map to array and filter
+    return Array.from(timestampMap.values())
       .filter((d) => d && d.x && (Number.isFinite(d.var) || Number.isFinite(d.prediction)));
   }, [data]);
 
@@ -51,6 +63,9 @@ export default function AP1GlobalChart({ data = [], forecastHorizon = 1 }) {
     const errors = []; // Collect all errors for confidence calculation
     const confidences = []; // Collect all confidences
     
+    // Calculate the time offset in milliseconds: M * 30 minutes
+    const timeOffsetMs = forecastHorizon * 30 * 60 * 1000;
+    
     for (let i = 0; i < processedData.length - forecastHorizon; i++) {
       const pointT = processedData[i];
       const pointTplusM = processedData[i + forecastHorizon];
@@ -59,10 +74,12 @@ export default function AP1GlobalChart({ data = [], forecastHorizon = 1 }) {
       const predictionAtT = Number.isFinite(pointT.prediction) ? pointT.prediction : undefined;
       
       const point = {
-        x: pointT.x,
+        x: pointTplusM.x,
         varAtT: Number.isFinite(pointT.var) ? pointT.var : undefined,
         predictionAtT,
         actualAtTplusM,
+        // Also store the timestamp from T for reference
+        xT: pointT.x,
       };
       
       // Add all individual models at T
@@ -117,6 +134,31 @@ export default function AP1GlobalChart({ data = [], forecastHorizon = 1 }) {
     return result;
   }, [processedData, forecastHorizon]);
 
+  // Create a combined dataset for chart: predictions are placed M steps earlier in the timeline
+  const combinedChartData = useMemo(() => {
+    if (horizonData.length === 0) return [];
+    
+    // Create array with the same length as horizonData
+    const combined = horizonData.map(point => ({
+      x: point.x,
+      actualAtTplusM: point.actualAtTplusM,
+      predictionAtT: undefined, // Will be filled by looking back M steps
+      confidence: point.confidence,
+      errorRel: point.errorRel,
+    }));
+    
+    // Shift predictions further BACK: prediction made at point[i] appears at position [i - M*2]
+    // This makes them more visually separated
+    horizonData.forEach((point, i) => {
+      const targetIndex = i - (forecastHorizon * 2);
+      if (targetIndex >= 0) {
+        combined[targetIndex].predictionAtT = point.predictionAtT;
+      }
+    });
+    
+    return combined;
+  }, [horizonData, forecastHorizon]);
+
   const fmt = (s) => {
     try {
       return new Date(s).toLocaleString();
@@ -154,7 +196,7 @@ export default function AP1GlobalChart({ data = [], forecastHorizon = 1 }) {
                 stroke="#ffffff"
                 interval="preserveStartEnd"
               />
-              <YAxis allowDataOverflow width={50} tick={{ fill: "#ffffff" }} stroke="#ffffff" />
+              <YAxis allowDataOverflow={false} width={50} tick={{ fill: "#ffffff" }} stroke="#ffffff" domain={[-0.5, 0.5]} />
               <Tooltip
                 labelFormatter={(v) => fmt(v)}
                 formatter={(value) => {
@@ -172,7 +214,7 @@ export default function AP1GlobalChart({ data = [], forecastHorizon = 1 }) {
                 stroke={MODEL_COLORS.var}
                 strokeWidth={2}
                 dot={false}
-                connectNulls
+                connectNulls={true}
               />
 
               {/* Adaptive Model (main, thicker line) */}
@@ -183,7 +225,7 @@ export default function AP1GlobalChart({ data = [], forecastHorizon = 1 }) {
                 stroke={MODEL_COLORS.prediction}
                 strokeWidth={2.5}
                 dot={false}
-                connectNulls
+                connectNulls={true}
               />
 
               {/* Individual models (thin semi-transparent lines) */}
@@ -209,7 +251,7 @@ export default function AP1GlobalChart({ data = [], forecastHorizon = 1 }) {
       {forecastHorizon > 1 && horizonData.length > 0 && (
         <div>
           <h3 style={{ marginTop: 40 }}>Prediction Horizon T+{forecastHorizon}</h3>
-          <p style={{ fontSize: 12, color: "#aaa" }}>
+          <p style={{ fontSize: 12, color: "#ffffffff" }}>
             Shows all model predictions made at time T (for T+{forecastHorizon}) vs actual value at T+{forecastHorizon} (blue).
             This represents {forecastHorizon} steps ahead forecasting ({(forecastHorizon * 30) % 1440 === 0 ? Math.floor(forecastHorizon * 30 / 60) : forecastHorizon * 30} minutes).
             Shaded area shows average confidence bounds (±1 std dev, error={horizonData._avgError?.toFixed(2)}).
@@ -217,7 +259,7 @@ export default function AP1GlobalChart({ data = [], forecastHorizon = 1 }) {
 
           <div style={{ width: "100%", height: 350 }}>
             <ResponsiveContainer>
-              <ComposedChart data={horizonData} margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
+              <ComposedChart data={combinedChartData} margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
                 <XAxis
                   dataKey="x"
@@ -227,7 +269,7 @@ export default function AP1GlobalChart({ data = [], forecastHorizon = 1 }) {
                   stroke="#ffffff"
                   interval="preserveStartEnd"
                 />
-                <YAxis allowDataOverflow width={50} tick={{ fill: "#ffffff" }} stroke="#ffffff" />
+                <YAxis allowDataOverflow={false} width={50} tick={{ fill: "#ffffff" }} stroke="#ffffff" domain={[-0.5, 0.5]} />
                 <Tooltip
                   labelFormatter={(v) => fmt(v)}
                   formatter={(value) => {
@@ -249,11 +291,11 @@ export default function AP1GlobalChart({ data = [], forecastHorizon = 1 }) {
                   isAnimationActive={false}
                 />
 
-                {/* Adaptive Prediction made at T */}
+                {/* Adaptive Prediction (shifted back M steps) */}
                 <Line
                   type="monotone"
                   dataKey="predictionAtT"
-                  name={`Adaptive Prediction at T`}
+                  name={`Prediction at T (shifted back ${forecastHorizon} steps)`}
                   stroke={MODEL_COLORS.prediction}
                   strokeWidth={2.5}
                   strokeDasharray="5 5"
@@ -261,22 +303,6 @@ export default function AP1GlobalChart({ data = [], forecastHorizon = 1 }) {
                   connectNulls
                   isAnimationActive={false}
                 />
-
-                {/* Individual models at T (thin semi-transparent lines) */}
-                {KNOWN_MODELS.map((modelName) => (
-                  <Line
-                    key={`${modelName}_T`}
-                    type="monotone"
-                    dataKey={`${modelName}_T`}
-                    name={`${modelName} at T`}
-                    stroke={MODEL_COLORS[modelName] || "#6b7280"}
-                    strokeWidth={1}
-                    strokeOpacity={0.5}
-                    dot={false}
-                    connectNulls
-                    isAnimationActive={false}
-                  />
-                ))}
               </ComposedChart>
             </ResponsiveContainer>
           </div>

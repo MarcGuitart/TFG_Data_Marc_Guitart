@@ -38,6 +38,8 @@ export default function AP1Chart({ data = [] }) {
   // Normalizar datos
   const norm = useMemo(() => {
     const toIso = (d) => {
+      // Use t_decision for predictions (when they were made)
+      if (d?.t_decision) return d.t_decision;
       if (typeof d?.x === "string") return d.x;
       if (Number.isFinite(d?.t)) return new Date(d.t).toISOString().slice(0, 19) + "Z";
       return undefined;
@@ -54,12 +56,13 @@ export default function AP1Chart({ data = [] }) {
           var: Number.isFinite(d?.var) ? d.var : undefined,
           prediction: Number.isFinite(d?.prediction) ? d.prediction : undefined,
           chosen_model: d?.chosen_model || undefined,
+          horizon: d?.horizon || 1,
         };
 
         // Copiar predicciones de modelos individuales
         for (const [k, v] of Object.entries(d)) {
           if (
-            !["x", "t", "var", "prediction", "pred_conf", "chosen_model"].includes(k) &&
+            !["x", "t", "t_decision", "var", "prediction", "pred_conf", "chosen_model", "horizon"].includes(k) &&
             Number.isFinite(v)
           ) {
             base[k] = v;
@@ -78,7 +81,7 @@ export default function AP1Chart({ data = [] }) {
       Object.keys(row).forEach((k) => keySet.add(k));
     }
     return [...keySet].filter(
-      (k) => !["x", "idx", "var", "prediction", "pred_conf", "chosen_model"].includes(k)
+      (k) => !["x", "idx", "var", "prediction", "pred_conf", "chosen_model", "horizon", "t_decision"].includes(k)
     );
   }, [norm]);
 

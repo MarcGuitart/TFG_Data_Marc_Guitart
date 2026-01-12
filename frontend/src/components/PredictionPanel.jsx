@@ -19,6 +19,8 @@ import {
   Lightbulb
 } from 'lucide-react';
 
+// Evidencia de componente sin variable de entonrno (hardcoded)
+
 const API_BASE = "http://localhost:8081";
 const DEFAULT_HOURS = 24;
 const FULL_HOURS = 999; // Para obtener todos los datos disponibles
@@ -126,22 +128,49 @@ const PredictionPanel = forwardRef((props, ref) => {
     fetchIds();
   }, [refreshKey]);
 
+  // Calculate T+1 data (ALWAYS baseline, regardless of selected horizon)
+  const dataForT1Chart = useMemo(() => {
+    if (points.length === 0) return [];
+    
+    return points.map((point, i) => {
+      if (i === 0) return null; // Skip first point (no previous prediction)
+      
+      const prevPoint = points[i - 1];
+      return {
+        x: point.t_decision || point.timestamp,
+        var: Number.isFinite(point?.var) ? point.var : undefined,
+        prediction: Number.isFinite(prevPoint?.prediction) ? prevPoint.prediction : undefined,
+        // Add individual models from previous point
+        linear: Number.isFinite(prevPoint?.linear) ? prevPoint.linear : undefined,
+        poly: Number.isFinite(prevPoint?.poly) ? prevPoint.poly : undefined,
+        kalman: Number.isFinite(prevPoint?.kalman) ? prevPoint.kalman : undefined,
+        alphabeta: Number.isFinite(prevPoint?.alphabeta) ? prevPoint.alphabeta : undefined,
+        naive: Number.isFinite(prevPoint?.naive || prevPoint?.base) ? (prevPoint.naive || prevPoint.base) : undefined,
+      };
+    }).filter(p => p !== null);
+  }, [points]);
+
   // Calculate T+M data for confidence evolution chart
+  // Compare predictions at T with actual values at T+M (shifted by forecastHorizon)
   const horizonDataForChart = useMemo(() => {
-    if (forecastHorizon <= 1 || points.length < forecastHorizon + 1) {
+    if (forecastHorizon <= 1 || points.length === 0) {
       return [];
     }
     
+    // For each point at index i (time T), compare prediction with actual at i+forecastHorizon (time T+M)
     const result = [];
     for (let i = 0; i < points.length - forecastHorizon; i++) {
-      const pointT = points[i];
-      const pointTplusM = points[i + forecastHorizon];
+      const pointAtT = points[i];
+      const pointAtTplusM = points[i + forecastHorizon];
       
       result.push({
-        actualAtTplusM: Number.isFinite(pointTplusM?.var) ? pointTplusM.var : undefined,
-        predictionAtT: Number.isFinite(pointT?.prediction) ? pointT.prediction : undefined,
+        actualAtTplusM: Number.isFinite(pointAtTplusM?.var) ? pointAtTplusM.var : undefined,
+        predictionAtT: Number.isFinite(pointAtT?.prediction) ? pointAtT.prediction : undefined,
+        varAtT: Number.isFinite(pointAtT?.var) ? pointAtT.var : undefined,
+        x: pointAtT?.t_decision || pointAtT?.timestamp,
       });
     }
+    
     return result;
   }, [points, forecastHorizon]);
 
@@ -393,7 +422,7 @@ const PredictionPanel = forwardRef((props, ref) => {
                   <Play size={20} />
                   Live Predictions
                 </h3>
-                <AP1GlobalChart data={points} forecastHorizon={forecastHorizon} />
+                <AP1GlobalChart data={dataForT1Chart} rawData={points} forecastHorizon={forecastHorizon} />
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 24 }}>
@@ -534,7 +563,7 @@ const PredictionPanel = forwardRef((props, ref) => {
                   <TrendingUp size={18} />
                   Complete Series Visualization
                 </h4>
-                <AP1GlobalChart data={points} forecastHorizon={forecastHorizon} />
+                <AP1GlobalChart data={dataForT1Chart} rawData={points} forecastHorizon={forecastHorizon} />
               </div>
 
               {/* Tabla completa con todos los puntos */}

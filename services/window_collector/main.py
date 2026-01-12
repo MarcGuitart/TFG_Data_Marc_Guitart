@@ -45,8 +45,10 @@ def wait_for_kafka(broker="kafka:9092", timeout=120):
             time.sleep(2)
     raise RuntimeError(f"[collector] ❌ Kafka no disponible en {broker}")
 
+# Timestamp parsing line demonstrating naive handling
+
 def _parse_ts(ts_any):
-    """Devuelve datetime UTC (seg.) desde string ISO/‘YYYY-mm-dd HH:MM:SS’ o datetime."""
+    """Returns datetime UTC (seg.) from string ISO/‘YYYY-mm-dd HH:MM:SS’ o datetime."""
     if ts_any is None:
         return None
     if isinstance(ts_any, datetime):
@@ -60,9 +62,9 @@ def _parse_ts(ts_any):
 
 def _shift_ts_to_today(ts_str):
     """
-    Mantiene la fecha y hora del CSV pero las traslada al pasado reciente.
-    Calcula cuántos días atrás estaba el timestamp original y lo traslada
-    manteniendo esa distancia relativa, pero dentro de la ventana de retention.
+    Keeps the date and time of the CSV but shifts them to the recent past.
+    Calculates how many days ago the original timestamp was and shifts it
+    maintaining that relative distance, but within the retention window.
     """
     if not ts_str:
         return datetime.utcnow().replace(tzinfo=timezone.utc)
@@ -73,20 +75,12 @@ def _shift_ts_to_today(ts_str):
     except Exception:
         return datetime.utcnow().replace(tzinfo=timezone.utc)
     
-    # Referencia: usamos una fecha base del CSV (primera fecha que aparezca)
-    # Para simplicidad, asumimos que queremos trasladar todo a los últimos 6 días
-    # Calculamos la diferencia desde una fecha base arbitraria (ej: 2025-03-10)
-    reference_date = datetime(2025, 3, 10)  # Primera fecha del CSV típico
-    
-    # Calculamos cuántos segundos han pasado desde la referencia
+    reference_date = datetime(2025, 3, 10) 
     delta_seconds = (original_dt - reference_date).total_seconds()
     
-    # Creamos un timestamp 7 días atrás desde ahora y sumamos el delta
-    # Esto asegura que incluso el último punto del CSV esté en el pasado
     now = datetime.utcnow().replace(tzinfo=timezone.utc)
-    base_past = now - timedelta(days=7)  # 7 días atrás (dentro de retention)
+    base_past = now - timedelta(days=7)  # 7 days ago
     
-    # Sumamos el delta desde la referencia
     result_dt = base_past + timedelta(seconds=delta_seconds)
     
     return result_dt

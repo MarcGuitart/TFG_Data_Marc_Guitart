@@ -103,9 +103,13 @@ class HyperModel:
         self._history: List[Dict[str, Any]] = []
         self._step_count: int = 0
 
-    def predict(self, series: Sequence[float]) -> Tuple[float, Dict[str, float]]:
+    def predict(self, series: Sequence[float], horizon: int = 1) -> Tuple[float, Dict[str, float]]:
         """
         Genera predicciones de todos los modelos y devuelve la combinada.
+        
+        Args:
+            series: Secuencia de observaciones históricas
+            horizon: Número de slots adelante para predecir (1=T+1, 5=T+5, etc.)
         
         En modo "weighted": promedio ponderado por pesos adaptativos (LEGACY)
         En modo "weighted_ensemble": promedio ponderado con pesos adaptativos actualizados (NUEVO)
@@ -116,7 +120,8 @@ class HyperModel:
         Returns:
             (y_hat_combined, {model_name: y_hat, ...})
         """
-        preds = {m.name: float(m.predict(series)) for m in self.models}
+        # Pass horizon to each model for T+M prediction
+        preds = {m.name: float(m.predict(series, horizon=horizon)) for m in self.models}
         self._last_preds = preds
         
         if self.mode == "adaptive" or self.mode == "greedy_adaptive":

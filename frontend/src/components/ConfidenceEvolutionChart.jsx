@@ -86,19 +86,20 @@ const ConfidenceEvolutionChart = ({ data, forecastHorizon = 1, horizonData = [] 
   }, [data]);
 
   // Calculate T+M confidence evolution data
+  // horizonData already contains correct T vs T+M comparison from AP1GlobalChart
   const horizonProcessedData = useMemo(() => {
     if (forecastHorizon <= 1 || !horizonData || horizonData.length === 0) return [];
 
     const processed = [];
 
+    // horizonData has predictions at T compared with actual values at T+M
     horizonData.forEach((point, idx) => {
-      // Calculate error for this T+M point
-      const actualAtTplusM = point.actualAtTplusM;
-      const predictionAtT = point.predictionAtT;
+      const actualValue = point.actualAtTplusM || point.varAtT;
+      const predictionValue = point.predictionAtT;
       
-      if (Number.isFinite(actualAtTplusM) && Number.isFinite(predictionAtT)) {
-        const errorAbs = Math.abs(predictionAtT - actualAtTplusM);
-        const errorRel = (errorAbs / Math.abs(actualAtTplusM)) * 100;
+      if (Number.isFinite(actualValue) && Number.isFinite(predictionValue)) {
+        const errorAbs = Math.abs(predictionValue - actualValue);
+        const errorRel = (errorAbs / Math.abs(actualValue)) * 100;
         const pointAccuracy = Math.max(0, Math.min(100, 100 - errorRel));
 
         processed.push({

@@ -331,8 +331,16 @@ def get_series(
     """
     Returns the observed series (var), the hybrid prediction (prediction),
     the predictions per model, the chosen model, and errors at each instant.
+    
+    Now includes temporal semantics:
+    - t_decision: moment when prediction was made (t)
+    - horizon: number of slots ahead being predicted (m)
     """
     start = f"-{hours}h"
+    
+    # Get the horizon from the last execution (default to 1)
+    global _last_forecast_horizon
+    current_horizon = _last_forecast_horizon.get("forecast_horizon", 1)
 
     try:
         var_series = _query_field("telemetry", id, "var", start)
@@ -479,6 +487,8 @@ def get_series(
         point = {
             "t": int(t.timestamp() * 1000),  # epoch ms
             "timestamp": t.isoformat(),      # ISO timestamp para LivePredictionChart
+            "t_decision": t.isoformat(),     # Momento de decisión (t) - para visualización
+            "horizon": current_horizon,      # Horizonte de predicción (m slots)
             "var": a_val,                    # valor observado
             "yhat": y_adaptive,              # AP1: EXACTAMENTE el modelo elegido
             "prediction": c_val,             # predicción híbrida (legacy)
@@ -503,6 +513,7 @@ def get_series(
 
     payload = {
         "id": id,
+        "horizon": current_horizon,       # Horizonte de predicción (m slots)
         "observed": observed,
         "predicted": predicted,       # híbrida
         "models": models_payload,     # por modelo
@@ -1114,14 +1125,13 @@ def download_weights_csv(unit_id: str):
         if not history:
             raise HTTPException(status_code=404, detail=f"No history for {unit_id}")
         
-        # Convertir a CSV en memoria
+        # Convert a CSV in memory
         output = StringIO()
         fieldnames = list(history[0].keys())
         writer = csv.DictWriter(output, fieldnames=fieldnames)
         writer.writeheader()
         
         for entry in history:
-            # Redondear floats para legibilidad
             row = {}
             for k, v in entry.items():
                 if isinstance(v, float):
@@ -1131,13 +1141,13 @@ def download_weights_csv(unit_id: str):
             writer.writerow(row)
         
         csv_content = output.getvalue()
-        
-        # Guardar en /app/data para análisis de IA
+
+        # Save in /app/data for AI analysis
         csv_path = f"/app/data/weights_history_{unit_id}.csv"
         with open(csv_path, 'w') as f:
             f.write(csv_content)
-        
-        # Devolver como archivo descargable
+
+        # Return as downloadable file
         filename = f"weights_history_{unit_id}.csv"
         
         return StreamingResponse(
@@ -1198,14 +1208,15 @@ def run_window(source: str = Query("uploaded.csv"), speed_ms: int = Query(0), fo
     # Pequeño delay para que el reset se propague
     time.sleep(1)
 
-    # 2) Dispara loader con el CSV especificado
+    # 2) Dispara loader con el CSV especificado y el horizonte
     payload = {
         "source": source,
-        "speed_ms": speed_ms
+        "speed_ms": speed_ms,
+        "forecast_horizon": forecast_horizon  # Pass horizon to loader
     }
     
     try:
-        print(f"[orchestrator] Triggering loader with source={source}, speed_ms={speed_ms}")
+        print(f"[orchestrator] Triggering loader with source={source}, speed_ms={speed_ms}, forecast_horizon={forecast_horizon}")
         r_trig = httpx.post(LOADER_URL, json=payload, timeout=120.0)
         r_trig.raise_for_status()
         data = r_trig.json() if r_trig.text else {}
@@ -1482,8 +1493,8 @@ async def analyze_report(id: str):
         from groq import Groq
         import csv
         import os
-        
-        # Configurar Groq API
+
+        # Configure Groq API
         api_key = os.getenv("GROQ_API_KEY")
         
         if not api_key:
@@ -1491,8 +1502,8 @@ async def analyze_report(id: str):
                 status_code=500, 
                 detail="GROQ_API_KEY not configured. Get free API key at: https://console.groq.com/keys"
             )
-        
-        # Leer el CSV exportado completo
+
+        # Reads the complete exported CSV
         csv_path = f"/app/data/weights_history_{id}.csv"
         
         if not os.path.exists(csv_path):
@@ -1500,8 +1511,8 @@ async def analyze_report(id: str):
                 status_code=404,
                 detail=f"No export found for series '{id}'. Please export the report first."
             )
-        
-        # Leer CSV y extraer información clave
+
+        # Reads the complete exported CSV and extracts key information
         csv_data = []
         with open(csv_path, 'r') as f:
             reader = csv.DictReader(f)
@@ -1509,16 +1520,16 @@ async def analyze_report(id: str):
         
         if not csv_data:
             raise HTTPException(status_code=404, detail="CSV file is empty")
-        
-        # Analizar estructura de datos
+
+        # Analyze data structure
         total_points = len(csv_data)
         first_row = csv_data[0]
         last_row = csv_data[-1]
-        
-        # Extraer columnas de modelos (weight_*)
+
+        # Extract columns de modelos (weight_*)
         model_names = [col.replace('weight_', '') for col in first_row.keys() if col.startswith('weight_')]
         
-        # Calcular estadísticas finales de cada modelo
+        # Compute final statistics for each model
         model_stats = {}
         for model in model_names:
             weights = []
@@ -1748,15 +1759,16 @@ async def analyze_report_advanced(
                 detail="GROQ_API_KEY not configured. Get free API key at: https://console.groq.com/keys"
             )
         
-        # ===== Preparar contexto del pipeline report =====
+        # Context for AI
+
         pipeline_context = f"""
-## Pipeline Execution Report
+            ## Pipeline Execution Report
 
-**Series ID:** {pipeline_report.get('id', 'Unknown')}
-**Total Data Points:** {pipeline_report.get('total', 0)}
+            **Series ID:** {pipeline_report.get('id', 'Unknown')}
+            **Total Data Points:** {pipeline_report.get('total', 0)}
 
-### Data Points Sample (first 5):
-"""
+            ### Data Points Sample (first 5):
+            """
         points = pipeline_report.get('points', [])[:5]
         for i, p in enumerate(points, 1):
             pipeline_context += f"\n{i}. Timestamp: {p.get('timestamp', 'N/A')}"
@@ -1782,9 +1794,11 @@ async def analyze_report_advanced(
                 
                 if rows:
                     # Extraer nombres de modelos
+
+                    # Export CSV Context
                     model_names = [col.replace('w_', '') for col in rows[0].keys() if col.startswith('w_')]
                     
-                    # Estadísticas de selección (chosen_by_error)
+                    # Selection statistics
                     selections = {}
                     weights_evolution = {m: [] for m in model_names}
                     rankings_by_model = {m: [] for m in model_names}
@@ -1880,8 +1894,9 @@ Please provide a comprehensive analysis covering:
 Provide specific numbers, percentages, and data-driven evidence for all claims.
 Use markdown formatting for clarity.
 """
-        
-        # ===== Llamar a Groq API =====
+
+        # Chat Completion Call Details
+
         client = Groq(api_key=api_key)
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",

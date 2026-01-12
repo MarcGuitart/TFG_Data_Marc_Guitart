@@ -3,6 +3,8 @@ import React, { useEffect, useState } from 'react';
 export default function KafkaOutPanel() {
   const [rows, setRows] = useState([]);
 
+  // Evidencia de Hardcoded sin variable de entorno
+
   useEffect(() => {
     const fetchProcessed = async () => {
       try {
