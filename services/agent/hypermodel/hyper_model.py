@@ -87,7 +87,7 @@ class HyperModel:
             inst = cls(name=name, **(m.get("params", {})))
             self.models.append(inst)
             self.model_names.append(name)
-            self.w[name] = float(m.get("init_weight", 0.0))  # AP3: iniciar a 0
+            self.w[name] = float(m.get("init_weight", 0.0))  
         
         # Estado interno
         self._last_preds: Dict[str, float] = {}
@@ -364,27 +364,28 @@ class HyperModel:
             
             # --- 6) Modelo elegido por peso acumulado (AP3) ---
             chosen_by_weight = max(self.model_names, key=lambda n: self.w[n])
+
+        # --- 7) Saving history for offline analysis ---
         
-        # --- 7) Guardar historial para análisis offline ---
         history_entry = {
             "step": self._step_count,
             "ts": ts or datetime.utcnow().isoformat(),
             "y_real": y_true,
-            # Predicciones por modelo
+            # Predictions for models    
             **{f"y_{name}": self._last_preds.get(name, 0.0) for name in self.model_names},
-            # Errores absolutos por modelo
+            # Absolute errors for models
             **{f"err_{name}": errors_abs.get(name, 0.0) for name in self.model_names},
-            # Errores relativos por modelo (%)
+            # Relative errors for models (%)
             **{f"err_rel_{name}": errors_rel.get(name, 0.0) for name in self.model_names},
-            # Pesos ANTES del update
+            # Weights BEFORE update
             **{f"w_pre_{name}": weights_before.get(name, 0.0) for name in self.model_names},
-            # Pesos DESPUÉS del update
+            # Weights AFTER update
             **{f"w_{name}": self.w.get(name, 0.0) for name in self.model_names},
-            # Rewards asignados
+            # Rewards assigned
             **{f"reward_{name}": rewards.get(name, 0) for name in self.model_names},
-            # Ranking (1 = mejor)
+            # Ranking (1 = best)
             **{f"rank_{name}": rank + 1 for rank, (name, _) in enumerate(ranked)},
-            # Decisiones
+            # Decisions
             "chosen_by_error": chosen_by_error_simple,
             "chosen_by_weight": chosen_by_weight,
             "choices_differ": chosen_by_error_simple != chosen_by_weight,
@@ -475,45 +476,26 @@ class HyperModel:
             "differ_pct": (differ / total * 100) if total > 0 else 0.0
         }
     
+
+    # The export_history_csv() fieldnames list (column schema)
+
     def export_history_csv(self, filepath: str) -> str:
-        """
-        AP3: Exporta el historial completo a CSV para análisis en Excel.
-        
-        Estructura de columnas (por fila):
-        1. TEMPORAL: step, ts
-        2. REAL: y_real
-        3. PREDICCIONES: y_{model} para cada modelo
-        4. ERRORES ABSOLUTOS: err_{model} para cada modelo
-        5. ERRORES RELATIVOS: err_rel_{model} para cada modelo
-        6. WEIGHTS ACTUALES: w_{model} para cada modelo (DESPUÉS del update)
-        7. RANKING: rank_{model} para cada modelo
-        8. DECISIÓN: chosen_by_error (modelo seleccionado)
-        
-        Args:
-            filepath: Ruta del archivo CSV a crear
-            
-        Returns:
-            filepath si éxito, o mensaje de error
-        """
         if not self._history:
-            return "No hay historial para exportar"
+            return "No history to export"
         
         try:
-            # Asegurar directorio existe
+            # Ensure directory exists
             os.makedirs(os.path.dirname(filepath) if os.path.dirname(filepath) else ".", exist_ok=True)
-            
-            # Extraer nombres de modelos de la primera entrada
+
+            # Extract model names
             first_entry = self._history[0]
             model_names = [k.replace("y_", "") for k in first_entry.keys() if k.startswith("y_") and k != "y_real"]
-            
-            # Construir orden de columnas: temporal → real → predicciones → errores → pesos → ranking → decisión
+
+            # Build column order: temporal → real → predictions → errors → weights → ranking → decisions
             fieldnames = [
-                # 1. TEMPORAL
                 "step", "ts",
-                # 2. REAL
                 "y_real",
             ]
-            
             # 3. PREDICCIONES por modelo
             for model in model_names:
                 fieldnames.append(f"y_{model}")
@@ -537,13 +519,14 @@ class HyperModel:
             # 8. DECISIÓN: modelo elegido por error mínimo (chosen by error)
             fieldnames.append("chosen_by_error")
             
-            # Campos opcionales que pueden estar en el historial
+            # Conditional inclusion of reward_ and w_pre_ fields
+
             optional_fields = ["total_reward", "choices_differ", "chosen_by_weight", "decay_share"]
             for field in optional_fields:
                 if field in first_entry and field not in fieldnames:
                     fieldnames.append(field)
-            
-            # Agregar campos pre-pesos y rewards si existen
+
+            # Agregate fields pre-weights and rewards if exists
             for model in model_names:
                 if f"w_pre_{model}" in first_entry and f"w_pre_{model}" not in fieldnames:
                     fieldnames.append(f"w_pre_{model}")
@@ -605,6 +588,8 @@ class HyperModel:
         """AP3: Resetea el historial (para nuevas ejecuciones)"""
         self._history = []
         self._step_count = 0
+
+    # Agent reset function showing score/history/buffer/last prediction clearance
     
     def reset_complete(self):
         """
@@ -614,11 +599,11 @@ class HyperModel:
         - Contadores a 0
         - Buffers de modelos base vacíos
         """
-        # Resetear pesos
+        # Reset weights
         for name in self.model_names:
             self.w[name] = 0.0
-        
-        # Limpiar historial y contadores
+
+        # Clear history and counters
         self._history = []
         self._step_count = 0
         self._last_preds = {}
@@ -629,11 +614,11 @@ class HyperModel:
         self._last_y_true = 0.0
         self._ensemble_error_abs = 0.0
         self._ensemble_error_rel = 0.0
-        
-        # Resetear buffers de modelos base (self.models es una LISTA)
+
+        # Reset base model buffers (self.models is a LIST)
         for model in self.models:
             if hasattr(model, 'reset'):
                 model.reset()
             elif hasattr(model, 'buf'):
-                # Limpiar buffer si existe
+                # Clear buffer if it exists
                 model.buf = []

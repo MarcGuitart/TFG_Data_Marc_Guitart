@@ -329,8 +329,8 @@ def get_series(
     hours: int = Query(24, ge=1, le=24*365)
 ):
     """
-    Devuelve la serie observada (var), la predicha híbrida (prediction),
-    las predicciones por modelo, el modelo elegido y errores en cada instante (AP2).
+    Returns the observed series (var), the hybrid prediction (prediction),
+    the predictions per model, the chosen model, and errors at each instant.
     """
     start = f"-{hours}h"
 
@@ -338,13 +338,12 @@ def get_series(
         var_series = _query_field("telemetry", id, "var", start)
         pred_series = _query_field("telemetry", id, "prediction", start)
         yhat_by_model = _query_models_yhat(id, start)
-        chosen_series = _query_chosen_model(id, start)  # AP2: modelo elegido
-        weights_by_model = _query_weights(id, start)    # AP3: pesos por modelo
-        chosen_errors = _query_chosen_errors(id, start) # AP2: errores del modelo elegido
+        chosen_series = _query_chosen_model(id, start)  
+        weights_by_model = _query_weights(id, start)    
+        chosen_errors = _query_chosen_errors(id, start) 
         logger.info(f"[/api/series] id={id} var_series={len(var_series)} pred_series={len(pred_series)} yhat_by_model keys={list(yhat_by_model.keys())} chosen={len(chosen_series)} errors={len(chosen_errors)} weights={list(weights_by_model.keys())}")
     except Exception as e:
         logger.exception("Failed to query series for /api/series")
-        # Retorna datos vacíos en lugar de error, para que el frontend pueda manejarlo
         return JSONResponse(content={
             "id": id,
             "observed": [],
@@ -1069,7 +1068,7 @@ AGENT_URL       = os.getenv("AGENT_URL", "http://agent:8090")  # AP3: URL del ag
 
 @app.get("/api/agent/weights/{unit_id}")
 def proxy_agent_weights(unit_id: str):
-    """AP3: Obtener pesos actuales de un HyperModel via agent"""
+    """Obtain current weights of a HyperModel via agent"""
     try:
         r = httpx.get(f"{AGENT_URL}/api/weights/{unit_id}", timeout=10.0)
         r.raise_for_status()
@@ -1081,7 +1080,7 @@ def proxy_agent_weights(unit_id: str):
 
 @app.get("/api/agent/history/{unit_id}")
 def proxy_agent_history(unit_id: str, last_n: int = 100):
-    """AP3: Obtener historial de pesos para análisis"""
+    """Obtain history of weights for analysis"""
     try:
         r = httpx.get(f"{AGENT_URL}/api/history/{unit_id}", params={"last_n": last_n}, timeout=10.0)
         r.raise_for_status()
@@ -1093,7 +1092,7 @@ def proxy_agent_history(unit_id: str, last_n: int = 100):
 
 @app.get("/api/agent/stats/{unit_id}")
 def proxy_agent_stats(unit_id: str):
-    """AP3: Estadísticas por modelo para la memoria del TFG"""
+    """Obtain statistics by model for TFG memory"""
     try:
         r = httpx.get(f"{AGENT_URL}/api/stats/{unit_id}", timeout=10.0)
         r.raise_for_status()
@@ -1105,14 +1104,8 @@ def proxy_agent_stats(unit_id: str):
 
 @app.get("/api/download_weights/{unit_id}")
 def download_weights_csv(unit_id: str):
-    """
-    Descarga el historial de pesos como CSV.
-    1. Pide al agente el historial completo
-    2. Convierte a CSV y guarda en /app/data para análisis de IA
-    3. Devuelve como archivo descargable
-    """
     try:
-        # Obtener historial del agente
+        # Obtain history of the agent
         r = httpx.get(f"{AGENT_URL}/api/history/{unit_id}", params={"last_n": 999999}, timeout=30.0)
         r.raise_for_status()
         data = r.json()
@@ -1238,13 +1231,15 @@ def get_forecast_horizon():
     }
 
 
+
+
 @app.post("/api/reset_system")
 def reset_system():
     """
-    Resetea completamente el sistema para empezar un nuevo experimento desde cero:
-    1. Limpia deduplicación del collector
+    Completely resets the system to start a new experiment from scratch:
+    3. Optionally clears InfluxDB (commented for safety)y)
     2. Resetea todos los HyperModels del agent (pesos e historial)
-    3. Opcionalmente limpia InfluxDB (comentado por seguridad)
+    Useful before running a new pipeline to avoid accumulation of
     
     Útil antes de ejecutar un nuevo pipeline para evitar acumulación de datos previos.
     """
@@ -1254,7 +1249,7 @@ def reset_system():
         "influxdb": {"status": "skipped", "message": "Manual cleanup required"}
     }
     
-    # 1. Reset Collector (deduplicación)
+    # 1. Reset Collector
     try:
         r_collector = httpx.post(COLLECTOR_RESET, timeout=10.0)
         r_collector.raise_for_status()
@@ -1262,7 +1257,7 @@ def reset_system():
     except Exception as e:
         results["collector"] = {"status": "error", "message": str(e)}
     
-    # 2. Reset Agent (todos los HyperModels)
+    # 2. Reset Agent
     try:
         r_agent = httpx.post(f"{AGENT_URL}/api/reset_all", timeout=10.0)
         r_agent.raise_for_status()
@@ -1270,7 +1265,7 @@ def reset_system():
     except Exception as e:
         results["agent"] = {"status": "error", "message": str(e)}
     
-    # 3. InfluxDB cleanup - Borrar todos los datos anteriores
+    # 3. InfluxDB cleanup - Delete all previous data
     try:
         from influxdb_client import InfluxDBClient
         from influxdb_client.client.delete_api import DeleteApi
@@ -1278,21 +1273,22 @@ def reset_system():
         client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
         delete_api = client.delete_api()
         
-        # Borrar TODOS los datos (desde 1970 hasta mañana)
+        # Delete ALL data
         start = "1970-01-01T00:00:00Z"
         stop = (datetime.utcnow() + timedelta(days=1)).isoformat() + "Z"
+
         
-        # Lista de TODOS los measurements que se escriben
+        # List of ALL measurements that are written
         measurements = [
-            "telemetry",           # predicciones y valores reales
-            "telemetry_models",    # predicciones por modelo individual
-            "weights",             # pesos del ensemble
-            "chosen_model",        # modelo elegido
-            "chosen_error",        # errores del modelo elegido
-            "model_errors",        # errores por modelo
-            "model_rankings",      # ranking de modelos
-            "model_rewards",       # rewards de modelos
-            "weight_decisions"     # decisiones de cambio de pesos
+            "telemetry",           # predictions and real values
+            "telemetry_models",    # predictions by individual model
+            "weights",             # ensemble weights
+            "chosen_model",        # chosen model
+            "chosen_error",        # errors of the chosen model
+            "model_errors",        # errors by model
+            "model_rankings",      # model rankings
+            "model_rewards",       # model rewards
+            "weight_decisions"     # weight change decisions
         ]
         
         deleted_count = 0
@@ -1324,14 +1320,13 @@ def reset_system():
         "status": "success" if all_success else "partial",
         "timestamp": datetime.utcnow().isoformat(),
         "details": results,
-        "message": "Sistema completamente reseteado. Listo para nuevo experimento." if all_success else "Reseteo parcial. Revisa detalles."
+        "message": "Complete system reset." if all_success else "Partial reset. Check details."
     }
 
 
 # Uploads
 UPLOAD_DIR = "/app/data"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-
 
 @app.post("/api/upload_csv")
 async def upload_csv(file: UploadFile = File(...)):

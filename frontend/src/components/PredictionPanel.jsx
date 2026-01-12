@@ -379,8 +379,8 @@ const PredictionPanel = forwardRef((props, ref) => {
       {error && <p style={{ fontSize: 12, color: "#fca5a5" }}>{error}</p>}
 
       {!loading && !error && points.length === 0 && (
-        <p style={{ fontSize: 12, color: "#999" }}>
-          Sin datos disponibles. Ejecuta el pipeline primero para cargar una serie temporal.
+        <p style={{ fontSize: 12, color: "#ffffffff" }}>
+          No data yet. Please run the pipeline first to load a time series.
         </p>
       )}
 
@@ -400,7 +400,7 @@ const PredictionPanel = forwardRef((props, ref) => {
                 <div>
                   <h3 style={{ fontSize: 16, marginBottom: 12, display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <BarChart3 size={18} />
-                    Selector Decisions (AP2)
+                    Selector Decisions
                   </h3>
                   <AP2SelectorTable data={selectorData} maxRows={10} />
                 </div>
@@ -408,7 +408,7 @@ const PredictionPanel = forwardRef((props, ref) => {
                 <div>
                   <h3 style={{ fontSize: 16, marginBottom: 12, display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <Trophy size={18} style={{ color: '#f59e0b' }} />
-                    Model Rankings (AP4)
+                    Model Rankings
                   </h3>
                   <AP4MetricsTable data={metricsData} />
                 </div>

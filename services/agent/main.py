@@ -193,8 +193,8 @@ def reset_hypermodel(unit_id: str):
 @app.post("/api/reset_all")
 def reset_all_hypermodels():
     """
-    Resetea TODOS los HyperModels activos y sus buffers de observaciones.
-    Útil para limpiar completamente el sistema antes de un nuevo experimento.
+    Reset ALL the active HyperModels and their observation buffers.
+    Useful for completely clearing the system before a new experiment.
     """
     reset_count = 0
     unit_ids = []
@@ -213,13 +213,13 @@ def reset_all_hypermodels():
         
         reset_count += 1
         unit_ids.append(unit_id)
-        log.info(f"[reset_all] HyperModel, buffer y predicciones reseteados completamente para {unit_id}")
-    
+        log.info(f"[reset_all] HyperModel, buffer and predictions reset for {unit_id}")
+
     return {
         "status": "reset_all",
         "reset_count": reset_count,
         "unit_ids": unit_ids,
-        "message": f"{reset_count} HyperModels reiniciados completamente (pesos, historial, buffers de observaciones)"
+        "message": f"{reset_count} HyperModels completely reset (weights, history, observation buffers)"
     }
 
 # === CLIENTES Influx ===
@@ -384,15 +384,18 @@ def learner_loop():
             log.error("learner error: %s", e)
         time.sleep(LEARN_PERIOD_SEC)
 
+
+
 # === HYPERMODEL STATE (por id) ===
 buffers_by_id: dict[str, collections.deque] = collections.defaultdict(lambda: collections.deque(maxlen=BUFFER_LEN))
 hyper_by_id: dict[str, HyperModel] = {}
 last_pred_by_id: dict[str, float] = {}
 
+
 def get_hyper_for(unit_id: str) -> HyperModel:
     hm = hyper_by_id.get(unit_id)
     if hm is None:
-        # instanciamos un HyperModel por id para que los pesos sean independientes por flujo
+        # instantiate a HyperModel per id so that weights are independent per stream
         hm = HyperModel(cfg_path=HYPER_CFG_PATH, decay=HYPER_DECAY, w_cap=HYPER_W_CAP, mode=HYPER_MODE)
         hyper_by_id[unit_id] = hm
         log.info("[hypermodel] creado para id=%s (cfg=%s, decay=%.3f, w_cap=%.1f, mode=%s)",
@@ -421,6 +424,7 @@ def main():
 
     log.info("escuchando %s y publicando en %s", TIN, TOUT)
 
+
     for msg in consumer:
         try:
             rec = msg.value
@@ -429,32 +433,30 @@ def main():
             log.error("error deserializando: %s %s", e, msg.value)
             continue
 
-        # 1) Persistimos observación en Influx
         try:
             write_timeseries(rec)
         except Exception as e:
             log.error("influx write error: %s", e)
 
-        # 2) Predicción con HyperModel (on-line, por id)
+
+        # Nearby evaluation block: Contrast auditable
+
         try:
             unit = rec.get("unit_id") or rec.get("id") or "unknown"
             y_real = rec.get("var")
             base_ts = select_ts(rec.get("timestamp"))
             ts_pred = base_ts + timedelta(minutes=PRED_HORIZON_MIN)
 
-
-            # --- actualizar pesos con la VERDAD del tick anterior (si existía pred previa)
             best_model = None
             ts_str = rec.get("timestamp") or base_ts.isoformat()
             if unit in last_pred_by_id and y_real is not None:
                 hm = get_hyper_for(unit)
                 try:
-                    # AP3: Pasamos timestamp para el historial
+                    # Passing timestamp
                     best_model = hm.update_weights(float(y_real), ts=ts_str)
                 except Exception as e:
                     log.warning("[hypermodel] update_weights error: %s", e)
 
-            # --- alimentar buffer y predecir siguiente paso
             buf = buffers_by_id[unit]
             if y_real is not None:
                 try:
@@ -462,19 +464,25 @@ def main():
                 except Exception:
                     pass
 
+            # The evaluation block: y_true vs stored y_hat, score update, overwrite
+
+
             hm = get_hyper_for(unit)
             y_hat, preds_by_model = hm.predict(list(buf))
             weights = hm.export_state()
-            chosen_model = hm.get_chosen_model()  # Modelo elegido (modo adaptive)
-            last_errors = hm.get_last_errors()     # Errores absolutos del último step
-            last_errors_rel = hm.get_last_errors_rel()  # AP2: Errores relativos
-            chosen_error = hm.get_chosen_error()   # AP2: Error del modelo elegido
+            chosen_model = hm.get_chosen_model()  # Chosen model
+            last_errors = hm.get_last_errors()     # Last step absolute errors
+            last_errors_rel = hm.get_last_errors_rel()  # Relative errors
+            chosen_error = hm.get_chosen_error()   # Chosen model error
             last_pred_by_id[unit] = y_hat
 
             log.info("[pred-ts] base=%s ts_pred=%s delta_min=%.1f",
                 base_ts.isoformat(), ts_pred.isoformat(),
                 (ts_pred - base_ts).total_seconds()/60.0)
-            # 3) Compatibilidad: conservamos tu horizonte y escritura de 'prediction'
+            
+
+            # Preserving the horizon and writing the prediction
+
             ts_pred = base_ts + timedelta(minutes=PRED_HORIZON_MIN)
             write_prediction(unit, ts_pred, y_hat)
 

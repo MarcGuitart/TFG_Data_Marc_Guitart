@@ -332,7 +332,7 @@ def run_consumer():
                 with _lock:
                     _last_by_key[k] = rec
 
-                # Escribir en Influx
+                # Writting in Influx
                 write_to_influx(rec)
 
                 print(f"[collector] ⚙️ recibido key={k}")

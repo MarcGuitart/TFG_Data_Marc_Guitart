@@ -224,7 +224,7 @@ const ConfidenceEvolutionChart = ({ data, forecastHorizon = 1, horizonData = [] 
           <TrendingUp size={22} />
           Confidence Evolution Over Time
         </h3>
-        <p style={{ fontSize: 13, color: "#aaa", marginBottom: 16 }}>
+        <p style={{ fontSize: 13, color: "#ffffffff", marginBottom: 16 }}>
           Shows how the system's prediction accuracy evolves as more data arrives. 
           The cumulative accuracy represents the overall performance up to each point.
         </p>
