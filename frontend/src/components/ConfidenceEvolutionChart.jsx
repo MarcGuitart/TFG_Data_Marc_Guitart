@@ -76,10 +76,17 @@ const ConfidenceEvolutionChart = ({ data, forecastHorizon = 1, horizonData = [] 
         const window = processed.slice(start, end);
         const smoothedAccuracy = window.reduce((sum, p) => sum + p.cumulativeAccuracy, 0) / window.length;
         processed[i].cumulativeAccuracySmoothed = parseFloat(smoothedAccuracy.toFixed(2));
+        
+        // Also calculate moving average of point accuracy
+        const movingAvgAccuracy = window.reduce((sum, p) => sum + p.pointAccuracy, 0) / window.length;
+        processed[i].movingAverageAccuracy = parseFloat(movingAvgAccuracy.toFixed(2));
       }
     } else {
       // If not enough data points for smoothing, use original values
-      processed.forEach(p => p.cumulativeAccuracySmoothed = p.cumulativeAccuracy);
+      processed.forEach(p => {
+        p.cumulativeAccuracySmoothed = p.cumulativeAccuracy;
+        p.movingAverageAccuracy = p.pointAccuracy;
+      });
     }
 
     return processed;
@@ -130,26 +137,26 @@ const ConfidenceEvolutionChart = ({ data, forecastHorizon = 1, horizonData = [] 
   const stats = useMemo(() => {
     if (processedData.length === 0) return null;
 
-    // Calculate average accuracy as mean of individual point accuracies (for consistency)
-    const pointAccuracies = processedData.map(p => p.pointAccuracy);
-    const avgAccuracyDirect = pointAccuracies.reduce((sum, acc) => sum + acc, 0) / pointAccuracies.length;
+    // Calculate average accuracy as mean of moving average accuracies
+    const movingAvgAccuracies = processedData.map(p => p.movingAverageAccuracy);
+    const avgAccuracyDirect = movingAvgAccuracies.reduce((sum, acc) => sum + acc, 0) / movingAvgAccuracies.length;
 
     const firstHalf = processedData.slice(0, Math.floor(processedData.length / 2));
     const secondHalf = processedData.slice(Math.floor(processedData.length / 2));
 
-    const avgFirst = firstHalf.reduce((sum, p) => sum + p.cumulativeAccuracySmoothed, 0) / firstHalf.length;
-    const avgSecond = secondHalf.reduce((sum, p) => sum + p.cumulativeAccuracySmoothed, 0) / secondHalf.length;
+    const avgFirst = firstHalf.reduce((sum, p) => sum + p.movingAverageAccuracy, 0) / firstHalf.length;
+    const avgSecond = secondHalf.reduce((sum, p) => sum + p.movingAverageAccuracy, 0) / secondHalf.length;
     const trend = avgSecond - avgFirst;
 
     const final = processedData[processedData.length - 1];
     const initial = processedData[0];
 
     return {
-      initial: initial.cumulativeAccuracySmoothed,
-      final: final.cumulativeAccuracySmoothed,
+      initial: initial.movingAverageAccuracy,
+      final: final.movingAverageAccuracy,
       trend: trend,
-      improvement: final.cumulativeAccuracySmoothed - initial.cumulativeAccuracySmoothed,
-      avgAccuracy: avgAccuracyDirect, // Use direct average of point accuracies
+      improvement: final.movingAverageAccuracy - initial.movingAverageAccuracy,
+      avgAccuracy: avgAccuracyDirect, // Use direct average of moving average accuracies
     };
   }, [processedData]);
 
@@ -200,8 +207,8 @@ const ConfidenceEvolutionChart = ({ data, forecastHorizon = 1, horizonData = [] 
           <div style={{ color: "#60a5fa", marginBottom: 4 }}>
             <strong>Point Accuracy:</strong> {data.pointAccuracy}%
           </div>
-          <div style={{ color: "#10b981", marginBottom: 4 }}>
-            <strong>Cumulative Accuracy:</strong> {data.cumulativeAccuracy}%
+          <div style={{ color: "#a78bfa", marginBottom: 4 }}>
+            <strong>Moving Average Accuracy:</strong> {data.movingAverageAccuracy}%
           </div>
         </div>
       );
@@ -386,11 +393,11 @@ const ConfidenceEvolutionChart = ({ data, forecastHorizon = 1, horizonData = [] 
             />
             <Line
               type="monotone"
-              dataKey="cumulativeAccuracySmoothed"
-              stroke="#10b981"
+              dataKey="movingAverageAccuracy"
+              stroke="#a78bfa"
               strokeWidth={3}
               dot={false}
-              name="Cumulative Accuracy (Smoothed)"
+              name="Moving Average Accuracy"
             />
           </ComposedChart>
         </ResponsiveContainer>
@@ -418,8 +425,8 @@ const ConfidenceEvolutionChart = ({ data, forecastHorizon = 1, horizonData = [] 
             accuracy at each data point (more volatile)
           </li>
           <li>
-            <strong style={{ color: "#10b981" }}>Cumulative Accuracy (green):</strong> Overall
-            accuracy from the beginning to current point
+            <strong style={{ color: "#a78bfa" }}>Moving Average Accuracy (purple):</strong> Smoothed
+            accuracy using a rolling window to show trends
           </li>
           <li>
             <strong style={{ color: "#10b981" }}>Green zone (≥85%):</strong> Excellent prediction
@@ -435,7 +442,7 @@ const ConfidenceEvolutionChart = ({ data, forecastHorizon = 1, horizonData = [] 
           </li>
         </ul>
         <div style={{ marginTop: 12, fontSize: 11, opacity: 0.7, fontStyle: "italic" }}>
-          A stabilizing cumulative accuracy line indicates the system has "learned" the data
+          A stabilizing moving average accuracy line indicates the system has "learned" the data
           patterns. An upward trend shows the adaptive ensemble is improving over time.
         </div>
       </div>

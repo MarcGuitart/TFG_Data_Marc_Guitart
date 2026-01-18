@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import {
   ResponsiveContainer, ComposedChart, XAxis, YAxis, Tooltip, Legend, Line, CartesianGrid, Area,
 } from "recharts";
@@ -14,6 +14,10 @@ import { MODEL_COLORS, MODEL_NAMES, KNOWN_MODELS } from "../constants/models";
  * - forecastHorizon: number (T+M) representing steps ahead to forecast
  */
 export default function AP1GlobalChart({ data = [], rawData = [], forecastHorizon = 1 }) {
+  // State for separate X and Y zoom levels
+  const [zoomX, setZoomX] = useState(1);
+  const [zoomY, setZoomY] = useState(1);
+  
   // Use rawData (original points from backend with horizon field) if available, otherwise fallback to data
   const sourceData = rawData.length > 0 ? rawData : data;
   
@@ -324,6 +328,92 @@ export default function AP1GlobalChart({ data = [], rawData = [], forecastHorizo
 
   return (
     <div style={{ width: "100%" }}>
+      {/* Zoom Control Sliders */}
+      <div style={{ 
+        display: "flex", 
+        flexDirection: "column",
+        gap: 12, 
+        marginBottom: 20, 
+        padding: "15px", 
+        background: "rgba(255,255,255,0.05)", 
+        borderRadius: 8,
+        border: "1px solid rgba(255,255,255,0.1)"
+      }}>
+        {/* X Axis Zoom */}
+        <div style={{ display: "flex", alignItems: "center", gap: 15 }}>
+          <label style={{ fontSize: 14, color: "#ffffff", fontWeight: 500, minWidth: 80 }}>
+            Zoom X: {zoomX.toFixed(1)}x
+          </label>
+          <input
+            type="range"
+            min="0.5"
+            max="4"
+            step="0.5"
+            value={zoomX}
+            onChange={(e) => setZoomX(parseFloat(e.target.value))}
+            style={{
+              flex: 1,
+              height: 6,
+              cursor: "pointer",
+              accentColor: "#f97316",
+              background: "linear-gradient(to right, #f97316 0%, #f59e0b 100%)"
+            }}
+          />
+          <button
+            onClick={() => setZoomX(1)}
+            style={{
+              padding: "6px 12px",
+              background: "#374151",
+              color: "#ffffff",
+              border: "1px solid #4b5563",
+              borderRadius: 4,
+              cursor: "pointer",
+              fontSize: 12,
+              fontWeight: 500
+            }}
+          >
+            Reset X
+          </button>
+        </div>
+
+        {/* Y Axis Zoom */}
+        <div style={{ display: "flex", alignItems: "center", gap: 15 }}>
+          <label style={{ fontSize: 14, color: "#ffffff", fontWeight: 500, minWidth: 80 }}>
+            Zoom Y: {zoomY.toFixed(1)}x
+          </label>
+          <input
+            type="range"
+            min="0.5"
+            max="4"
+            step="0.5"
+            value={zoomY}
+            onChange={(e) => setZoomY(parseFloat(e.target.value))}
+            style={{
+              flex: 1,
+              height: 6,
+              cursor: "pointer",
+              accentColor: "#10b981",
+              background: "linear-gradient(to right, #10b981 0%, #34d399 100%)"
+            }}
+          />
+          <button
+            onClick={() => setZoomY(1)}
+            style={{
+              padding: "6px 12px",
+              background: "#374151",
+              color: "#ffffff",
+              border: "1px solid #4b5563",
+              borderRadius: 4,
+              cursor: "pointer",
+              fontSize: 12,
+              fontWeight: 500
+            }}
+          >
+            Reset Y
+          </button>
+        </div>
+      </div>
+
       {/* T+1 or T+M Chart (depends on forecastHorizon) */}
       <div style={{ marginBottom: forecastHorizon > 1 ? 40 : 0 }}>
         <h3>Global View of the Complete Series (T+{forecastHorizon})</h3>
@@ -331,19 +421,19 @@ export default function AP1GlobalChart({ data = [], rawData = [], forecastHorizo
           Real traffic (blue) vs Adaptive ensemble prediction (orange) and individual model predictions (semi-transparent)
         </p>
 
-        <div style={{ width: "100%", height: 350 }}>
-          <ResponsiveContainer>
+        <div style={{ width: "100%", height: 350 * zoomY, overflow: "auto" }}>
+          <ResponsiveContainer width={`${100 * zoomX}%`}>
             <ComposedChart data={processedDataForChart} margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
               <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
               <XAxis
                 dataKey="x"
                 tickFormatter={(v) => (v ? new Date(v).toLocaleTimeString() : "")}
-                minTickGap={60}
+                minTickGap={60 / zoomX}
                 tick={{ fill: "#ffffff" }}
                 stroke="#ffffff"
                 interval="preserveStartEnd"
               />
-              <YAxis allowDataOverflow width={50} tick={{ fill: "#ffffff" }} stroke="#ffffff" />
+              <YAxis allowDataOverflow width={50} tick={{ fill: "#ffffff" }} stroke="#ffffff" domain={[-0.25, 0.5]} />
               <Tooltip
                 labelFormatter={(v) => fmt(v)}
                 formatter={(value) => {
@@ -404,19 +494,19 @@ export default function AP1GlobalChart({ data = [], rawData = [], forecastHorizo
             Shaded area shows average confidence bounds (±1 std dev, error={horizonData._avgError?.toFixed(2)}).
           </p>
 
-          <div style={{ width: "100%", height: 350 }}>
-            <ResponsiveContainer>
+          <div style={{ width: "100%", height: 350 * zoomY, overflow: "auto" }}>
+            <ResponsiveContainer width={`${100 * zoomX}%`}>
               <ComposedChart data={combinedChartData} margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
                 <XAxis
                   dataKey="x"
                   tickFormatter={(v) => (v ? new Date(v).toLocaleTimeString() : "")}
-                  minTickGap={60}
+                  minTickGap={60 / zoomX}
                   tick={{ fill: "#ffffff" }}
                   stroke="#ffffff"
                   interval="preserveStartEnd"
                 />
-                <YAxis allowDataOverflow={false} width={50} tick={{ fill: "#ffffff" }} stroke="#ffffff" domain={[-0.5, 0.5]} />
+                <YAxis allowDataOverflow={false} width={50} tick={{ fill: "#ffffff" }} stroke="#ffffff" domain={[-0.25, 0.5]} />
                 <Tooltip
                   labelFormatter={(v) => fmt(v)}
                   formatter={(value) => {
@@ -442,7 +532,7 @@ export default function AP1GlobalChart({ data = [], rawData = [], forecastHorizo
                 <Line
                   type="monotone"
                   dataKey="predictionAtT"
-                  name={`Prediction at T (shifted back ${forecastHorizon} steps)`}
+                  name={`Prediction at T`}
                   stroke={MODEL_COLORS.prediction}
                   strokeWidth={2.5}
                   strokeDasharray="5 5"
