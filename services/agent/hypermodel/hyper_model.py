@@ -215,23 +215,21 @@ class HyperModel:
         self._step_count += 1
         N = len(self.model_names)
         
-        # --- 1) Calcular errores de predicción ---
+        # Compute errors of prediction
         errors_abs = {}
         errors_rel = {}
-        EPS_REL = 0.01  # Epsilon para evitar división por valores muy pequeños
-        MAX_ERR_REL = 100.0  # Clamp máximo para error relativo (±100%)
-        
+        EPS_REL = 0.01  # Epsilon to avoid division by very small values
+        MAX_ERR_REL = 100.0  # Clamp maximum for relative error (±100%)
+
         for name, y_pred in self._last_preds.items():
             e_abs = abs(y_true - y_pred)
             errors_abs[name] = e_abs
-            
-            # Error relativo con protección contra división por cero y clamp
+
+            # Relative Error with protection against division by zero and clamp
             if abs(y_true) > EPS_REL:
                 e_rel = ((y_pred - y_true) / y_true) * 100.0
-                # Clamp para evitar valores absurdos (-700%, +2500%, etc.)
                 e_rel = max(-MAX_ERR_REL, min(MAX_ERR_REL, e_rel))
             else:
-                # Si real es ~0, usar error absoluto como proxy o marcar como N/A
                 e_rel = 0.0 if abs(y_pred) < EPS_REL else (100.0 if y_pred > 0 else -100.0)
             errors_rel[name] = e_rel
         
@@ -239,18 +237,17 @@ class HyperModel:
         self._last_errors_rel = errors_rel
         self._last_y_true = y_true
         
-        # --- Calcular error del ensemble (predicción final vs real) ---
         if self._last_y_hat is not None:
-            self._ensemble_error_abs = abs(y_true - self._last_y_hat)
+            self._ensemble_error_abs = abs(y_true - self._last_y_hat) # Prediction vs Real in t+M
             if abs(y_true) > EPS_REL:
                 self._ensemble_error_rel = ((self._last_y_hat - y_true) / y_true) * 100.0
                 self._ensemble_error_rel = max(-MAX_ERR_REL, min(MAX_ERR_REL, self._ensemble_error_rel))
             else:
                 self._ensemble_error_rel = 0.0 if abs(self._last_y_hat) < EPS_REL else (100.0 if self._last_y_hat > 0 else -100.0)
         
-        weights_before = dict(self.w)  # Guardar para historial
-        
-        # --- Ordenar por error ascendente (mejor primero) ---
+        weights_before = dict(self.w) 
+
+        # Sort by absolute error
         ranked = sorted(errors_abs.items(), key=lambda kv: kv[1])
         chosen_by_error_simple = ranked[0][0]  # Mejor modelo por error
         

@@ -1344,12 +1344,12 @@ async def upload_csv(file: UploadFile = File(...)):
     if not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Only CSV files are allowed")
 
-    dest_path = os.path.join(UPLOAD_DIR, "uploaded.csv")  # <-- nombre fijo
+    dest_path = os.path.join(UPLOAD_DIR, "uploaded.csv") 
     contents = await file.read()
     with open(dest_path, "wb") as f:
         f.write(contents)
 
-    # contar filas de forma barata
+    # counts rows
     try:
         text = contents.decode("utf-8", errors="ignore").splitlines()
         reader = csv.DictReader(text)

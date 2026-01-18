@@ -13,15 +13,21 @@ import { MODEL_COLORS, MODEL_NAMES, KNOWN_MODELS } from "../constants/models";
  * - data: array of points with {t, var, prediction, linear, poly, alphabeta, kalman, naive}
  * - forecastHorizon: number (T+M) representing steps ahead to forecast
  */
-export default function AP1GlobalChart({ data = [], forecastHorizon = 1 }) {
+export default function AP1GlobalChart({ data = [], rawData = [], forecastHorizon = 1 }) {
+  // Use rawData (original points from backend with horizon field) if available, otherwise fallback to data
+  const sourceData = rawData.length > 0 ? rawData : data;
+  
   const processedData = useMemo(() => {
-    const rawData = Array.isArray(data) ? data : [];
+    const input = Array.isArray(sourceData) ? sourceData : [];
+    // Don't need to process further - rawData already has the correct structure
     
-    // First pass: create a map with unique timestamps
+    // For T+1 chart: create standard mapping (for compatibility)
+    // For T+M chart: will be handled separately below
+    
     const timestampMap = new Map();
     
-    rawData.forEach((d) => {
-      const x = d.x || (Number.isFinite(d?.t) ? new Date(d.t).toISOString().slice(0, 19) + "Z" : undefined);
+    input.forEach((d) => {
+      const x = d.x || d.t_decision || d.timestamp || (Number.isFinite(d?.t) ? new Date(d.t).toISOString() : undefined);
       if (!x) return;
       
       if (!timestampMap.has(x)) {
@@ -30,7 +36,6 @@ export default function AP1GlobalChart({ data = [], forecastHorizon = 1 }) {
       
       const point = timestampMap.get(x);
       
-      // Merge var and prediction at the same timestamp
       if (Number.isFinite(d?.var)) {
         point.var = d.var;
       }
@@ -47,24 +52,100 @@ export default function AP1GlobalChart({ data = [], forecastHorizon = 1 }) {
       });
     });
     
-    // Second pass: convert map to array and filter
     return Array.from(timestampMap.values())
       .filter((d) => d && d.x && (Number.isFinite(d.var) || Number.isFinite(d.prediction)));
-  }, [data]);
+  }, [sourceData]);
 
-  // Calculate T+M data: for each point, use its prediction as "T" and look ahead M steps for actual value
-  // Include all models and calculate confidence bounds
+  // Calculate T+M data using horizon field if available in sourceData
   const horizonData = useMemo(() => {
-    if (forecastHorizon <= 1 || processedData.length < forecastHorizon + 1) {
+    if (forecastHorizon <= 1) {
+      return [];
+    }
+    
+    // If we have rawData with horizon field, use it directly
+    if (rawData.length > 0 && rawData[0]?.horizon !== undefined) {
+      // rawData points already have horizon field - use them directly
+      const result = [];
+      const errors = [];
+      const confidences = [];
+      
+      // Create a map of predictions by index (shifted)
+      // The prediction in rawData[i] is actually for rawData[i+1]
+      const predictionsByIndex = new Map();
+      rawData.forEach((point, idx) => {
+        if (Number.isFinite(point.prediction)) {
+          // Predict for next point
+          predictionsByIndex.set(idx + 1, point.prediction);
+        }
+      });
+      
+      // Process points STARTING FROM INDEX 1 (because index 0 has no previous prediction)
+      for (let idx = 1; idx < rawData.length; idx++) {
+        const point = rawData[idx];
+        const pointHorizon = point.horizon || 1;
+        
+        if (pointHorizon === forecastHorizon) {
+          // Get prediction that was made FOR this point (from previous point)
+          const predictionAtT = predictionsByIndex.get(idx);
+          const actualAtTplusM = Number.isFinite(point.var) ? point.var : undefined;
+          
+          // Use the CURRENT point's timestamp (T+M, where observation happened)
+          const timestampForDisplay = point.t_decision || point.timestamp || point.x;
+          
+          // For the prediction line, shift it back by M*30 minutes to align visually
+          // So they both appear at the same timestamp on the chart
+          const shiftMillis = forecastHorizon * 30 * 60 * 1000;
+          const shiftedTimestampForPrediction = new Date(new Date(timestampForDisplay).getTime() - shiftMillis).toISOString();
+          
+          const dataPoint = {
+            x: timestampForDisplay, // Observation stays at T+M
+            xPredictionShifted: shiftedTimestampForPrediction, // Prediction shifted back to align
+            varAtT: undefined,
+            predictionAtT,
+            actualAtTplusM,
+          };
+          
+          if (Number.isFinite(predictionAtT) && Number.isFinite(actualAtTplusM)) {
+            const error = Math.abs(predictionAtT - actualAtTplusM);
+            const errorRel = (error / Math.abs(actualAtTplusM)) * 100;
+            const confidence = Math.max(0, Math.min(100, 100 - errorRel));
+            
+            errors.push(error);
+            confidences.push(confidence);
+            dataPoint.errorRel = errorRel;
+            dataPoint.confidence = confidence;
+          }
+          
+          result.push(dataPoint);
+        }
+      }
+      
+      // Calculate stats
+      let avgError = 0, stdDev = 0, avgConfidence = 0;
+      if (errors.length > 0) {
+        avgError = errors.reduce((a, b) => a + b, 0) / errors.length;
+        const variance = errors.reduce((a, e) => a + Math.pow(e - avgError, 2), 0) / errors.length;
+        stdDev = Math.sqrt(variance);
+      }
+      if (confidences.length > 0) {
+        avgConfidence = confidences.reduce((a, b) => a + b, 0) / confidences.length;
+      }
+      
+      result._avgError = avgError;
+      result._stdDev = stdDev;
+      result._avgConfidence = avgConfidence;
+      
+      return result;
+    }
+    
+    // Fallback to processedData method (for backward compatibility with data prop)
+    if (processedData.length < forecastHorizon + 1) {
       return [];
     }
     
     const result = [];
-    const errors = []; // Collect all errors for confidence calculation
-    const confidences = []; // Collect all confidences
-    
-    // Calculate the time offset in milliseconds: M * 30 minutes
-    const timeOffsetMs = forecastHorizon * 30 * 60 * 1000;
+    const errors = [];
+    const confidences = [];
     
     for (let i = 0; i < processedData.length - forecastHorizon; i++) {
       const pointT = processedData[i];
@@ -74,12 +155,11 @@ export default function AP1GlobalChart({ data = [], forecastHorizon = 1 }) {
       const predictionAtT = Number.isFinite(pointT.prediction) ? pointT.prediction : undefined;
       
       const point = {
-        x: pointTplusM.x,
+        x: pointT.x,
         varAtT: Number.isFinite(pointT.var) ? pointT.var : undefined,
         predictionAtT,
         actualAtTplusM,
-        // Also store the timestamp from T for reference
-        xT: pointT.x,
+        xTplusM: pointTplusM.x,
       };
       
       // Add all individual models at T
@@ -132,32 +212,52 @@ export default function AP1GlobalChart({ data = [], forecastHorizon = 1 }) {
     result._avgConfidence = avgConfidence;
     
     return result;
-  }, [processedData, forecastHorizon]);
+  }, [rawData, processedData, forecastHorizon]);
 
-  // Create a combined dataset for chart: predictions are placed M steps earlier in the timeline
+  // combinedChartData: Create separate entries for predictions (shifted) and observations (not shifted)
   const combinedChartData = useMemo(() => {
     if (horizonData.length === 0) return [];
     
-    // Create array with the same length as horizonData
-    const combined = horizonData.map(point => ({
-      x: point.x,
-      actualAtTplusM: point.actualAtTplusM,
-      predictionAtT: undefined, // Will be filled by looking back M steps
-      confidence: point.confidence,
-      errorRel: point.errorRel,
-    }));
+    // Create combined data with both observation timestamps and shifted prediction timestamps
+    const combined = [];
     
-    // Shift predictions further BACK: prediction made at point[i] appears at position [i - M*2]
-    // This makes them more visually separated
-    horizonData.forEach((point, i) => {
-      const targetIndex = i - (forecastHorizon * 2);
-      if (targetIndex >= 0) {
-        combined[targetIndex].predictionAtT = point.predictionAtT;
+    horizonData.forEach((point) => {
+      // Add observation at its original timestamp
+      combined.push({
+        x: point.x,
+        actualAtTplusM: point.actualAtTplusM,
+        predictionAtT: undefined,
+        errorRel: point.errorRel,
+        confidence: point.confidence,
+      });
+      
+      // Add prediction at the shifted timestamp
+      if (Number.isFinite(point.predictionAtT)) {
+        combined.push({
+          x: point.xPredictionShifted,
+          actualAtTplusM: undefined,
+          predictionAtT: point.predictionAtT,
+          errorRel: point.errorRel,
+          confidence: point.confidence,
+        });
       }
     });
     
+    // Sort by x timestamp to maintain chronological order
+    combined.sort((a, b) => {
+      const timeA = new Date(a.x).getTime();
+      const timeB = new Date(b.x).getTime();
+      return timeA - timeB;
+    });
+    
+    console.log("[AP1GlobalChart] combinedChartData length:", combined.length);
+    if (combined.length > 1) {
+      console.log("[AP1GlobalChart] combinedChartData[0]:", {x: combined[0].x, pred: combined[0].predictionAtT, actual: combined[0].actualAtTplusM});
+      console.log("[AP1GlobalChart] combinedChartData[1]:", {x: combined[1].x, pred: combined[1].predictionAtT, actual: combined[1].actualAtTplusM});
+    }
+    
     return combined;
-  }, [horizonData, forecastHorizon]);
+  }, [horizonData]);
 
   const fmt = (s) => {
     try {
@@ -166,6 +266,53 @@ export default function AP1GlobalChart({ data = [], forecastHorizon = 1 }) {
       return String(s);
     }
   };
+
+  // For T+1 chart: create a combined dataset where predictions are shifted back by one step (30 minutes)
+  // OR by forecastHorizon steps if that's what was selected
+  const processedDataForChart = useMemo(() => {
+    if (processedData.length === 0) return [];
+    
+    const combined = [];
+    const shiftMillis = forecastHorizon * 30 * 60 * 1000; // Shift by horizon steps
+    
+    processedData.forEach((point, idx) => {
+      // Add observation at its original timestamp
+      combined.push({
+        x: point.x,
+        var: point.var,
+        prediction: undefined,
+        linear: undefined,
+        poly: undefined,
+        kalman: undefined,
+        alphabeta: undefined,
+        naive: undefined,
+      });
+      
+      // Add prediction at shifted timestamp
+      if (Number.isFinite(point.prediction)) {
+        const shiftedTimestamp = new Date(new Date(point.x).getTime() - shiftMillis).toISOString();
+        combined.push({
+          x: shiftedTimestamp,
+          var: undefined,
+          prediction: point.prediction,
+          linear: point.linear,
+          poly: point.poly,
+          kalman: point.kalman,
+          alphabeta: point.alphabeta,
+          naive: point.naive,
+        });
+      }
+    });
+    
+    // Sort by timestamp
+    combined.sort((a, b) => {
+      const timeA = new Date(a.x).getTime();
+      const timeB = new Date(b.x).getTime();
+      return timeA - timeB;
+    });
+    
+    return combined;
+  }, [processedData, forecastHorizon]);
 
   if (!processedData.length) {
     return (
@@ -177,16 +324,16 @@ export default function AP1GlobalChart({ data = [], forecastHorizon = 1 }) {
 
   return (
     <div style={{ width: "100%" }}>
-      {/* T+1 Chart (Standard) */}
+      {/* T+1 or T+M Chart (depends on forecastHorizon) */}
       <div style={{ marginBottom: forecastHorizon > 1 ? 40 : 0 }}>
-        <h3>Global View of the Complete Series (T+1 Standard)</h3>
+        <h3>Global View of the Complete Series (T+{forecastHorizon})</h3>
         <p style={{ fontSize: 12, color: "#ffffffff" }}>
           Real traffic (blue) vs Adaptive ensemble prediction (orange) and individual model predictions (semi-transparent)
         </p>
 
         <div style={{ width: "100%", height: 350 }}>
           <ResponsiveContainer>
-            <ComposedChart data={processedData} margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
+            <ComposedChart data={processedDataForChart} margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
               <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
               <XAxis
                 dataKey="x"
@@ -196,7 +343,7 @@ export default function AP1GlobalChart({ data = [], forecastHorizon = 1 }) {
                 stroke="#ffffff"
                 interval="preserveStartEnd"
               />
-              <YAxis allowDataOverflow={false} width={50} tick={{ fill: "#ffffff" }} stroke="#ffffff" domain={[-0.5, 0.5]} />
+              <YAxis allowDataOverflow width={50} tick={{ fill: "#ffffff" }} stroke="#ffffff" />
               <Tooltip
                 labelFormatter={(v) => fmt(v)}
                 formatter={(value) => {
@@ -214,7 +361,7 @@ export default function AP1GlobalChart({ data = [], forecastHorizon = 1 }) {
                 stroke={MODEL_COLORS.var}
                 strokeWidth={2}
                 dot={false}
-                connectNulls={true}
+                connectNulls
               />
 
               {/* Adaptive Model (main, thicker line) */}
@@ -225,7 +372,7 @@ export default function AP1GlobalChart({ data = [], forecastHorizon = 1 }) {
                 stroke={MODEL_COLORS.prediction}
                 strokeWidth={2.5}
                 dot={false}
-                connectNulls={true}
+                connectNulls
               />
 
               {/* Individual models (thin semi-transparent lines) */}

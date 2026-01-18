@@ -389,7 +389,8 @@ def learner_loop():
 
 
 
-# === HYPERMODEL STATE (por id) ===
+# Dict-of-Dict y Dict-of-Queues 7.5.3-A
+
 buffers_by_id: dict[str, collections.deque] = collections.defaultdict(lambda: collections.deque(maxlen=BUFFER_LEN))
 hyper_by_id: dict[str, HyperModel] = {}
 last_pred_by_id: dict[str, float] = {}
@@ -398,7 +399,6 @@ last_pred_by_id: dict[str, float] = {}
 def get_hyper_for(unit_id: str) -> HyperModel:
     hm = hyper_by_id.get(unit_id)
     if hm is None:
-        # instantiate a HyperModel per id so that weights are independent per stream
         hm = HyperModel(cfg_path=HYPER_CFG_PATH, decay=HYPER_DECAY, w_cap=HYPER_W_CAP, mode=HYPER_MODE)
         hyper_by_id[unit_id] = hm
         log.info("[hypermodel] creado para id=%s (cfg=%s, decay=%.3f, w_cap=%.1f, mode=%s)",
@@ -442,13 +442,15 @@ def main():
             log.error("influx write error: %s", e)
 
 
-        # Nearby evaluation block: Contrast auditable
+        
 
         try:
             unit = rec.get("unit_id") or rec.get("id") or "unknown"
             y_real = rec.get("var")
+
+            # 7.5.3-A second photo
+
             base_ts = select_ts(rec.get("timestamp"))
-            # ts_pred is calculated later after we know the horizon
 
             best_model = None
             ts_str = rec.get("timestamp") or base_ts.isoformat()
@@ -468,9 +470,8 @@ def main():
                     pass
 
             # The evaluation block: y_true vs stored y_hat, score update, overwrite
-
             # Get horizon from message (sent by loader) or fall back to env variable
-            # forecast_horizon from message is in SLOTS (1 = T+1, 5 = T+5)
+            
             msg_horizon = rec.get("forecast_horizon")
             if msg_horizon is not None:
                 horizon_slots = max(1, int(msg_horizon))
@@ -493,52 +494,45 @@ def main():
             last_pred_by_id[unit] = y_hat
 
             # Calculate ts_pred based on the horizon
+
             ts_pred = base_ts + timedelta(minutes=horizon_minutes)  # t + m
             
             log.info("[pred-ts] base=%s ts_pred=%s horizon=T+%d delta_min=%.1f",
                 base_ts.isoformat(), ts_pred.isoformat(), horizon_slots,
                 (ts_pred - base_ts).total_seconds()/60.0)
-            
-
-            # Preserving the horizon and writing the prediction
-            # KEY: Separamos semántica temporal:
-            # - t_decision (base_ts): momento en que se genera la predicción
-            # - t_target (ts_pred): momento futuro que se está prediciendo
-            # - horizon: número de slots adelante (m)
 
             write_prediction(unit, ts_pred, y_hat)
 
-            # 4) Publicamos mensaje enriquecido (compatible + telemetría HyperModel)
             enriched = dict(rec)
-            enriched["yhat"] = float(y_hat)                  # COMPAT: collector la escribe en 'prediction'
-            enriched["ts_pred"] = ts_pred.strftime("%Y-%m-%d %H:%M:%S")  # t + m (evaluation time)
+            enriched["yhat"] = float(y_hat)                  # Collector writes in 'prediction'
+            enriched["ts_pred"] = ts_pred.strftime("%Y-%m-%d %H:%M:%S")  # target timestamp (t + m)
             enriched["ts_decision"] = base_ts.strftime("%Y-%m-%d %H:%M:%S")  # t (decision time)
-            enriched["ts_influx"] = base_ts.strftime("%Y-%m-%d %H:%M:%S")  # Timestamp que usamos para InfluxDB
+            enriched["ts_influx"] = base_ts.strftime("%Y-%m-%d %H:%M:%S")  # Timestamp used for InfluxDB
             enriched["horizon"] = horizon_slots  # m (number of slots ahead)
             enriched["mode"] = FLAVOR
             if "timestamp" in enriched and "ts" not in enriched:
                 enriched["ts"] = enriched["timestamp"]
 
-            # Telemetría opcional (por si luego la colectas en otra measurement)
+            # Optional telemetry (in case you collect it in another measurement later)
             enriched["hyper_y_hat"] = float(y_hat)
             enriched["hyper_models"] = preds_by_model
             enriched["hyper_weights"] = weights
-            enriched["hyper_chosen"] = chosen_model       # Modelo elegido (AP2)
-            enriched["hyper_errors"] = last_errors        # Errores absolutos por modelo
-            enriched["hyper_errors_rel"] = last_errors_rel  # AP2: Errores relativos por modelo
-            
-            # AP2: Error específico del modelo elegido
+            enriched["hyper_chosen"] = chosen_model       # Chosen model
+            enriched["hyper_errors"] = last_errors        # Absolute errors by model
+            enriched["hyper_errors_rel"] = last_errors_rel  # Relative errors by model
+
+            # Specific error of the chosen model
             enriched["chosen_error_abs"] = chosen_error.get("abs", 0.0)
             enriched["chosen_error_rel"] = chosen_error.get("rel", 0.0)
-            
-            # AP3: Información adicional del sistema de pesos con memoria
+
+            # Additional information from the memory-weighted system
             last_entry = hm.get_last_history_entry()
             if last_entry:
                 enriched["chosen_by_error"] = last_entry.get("chosen_by_error", "")
                 enriched["chosen_by_weight"] = last_entry.get("chosen_by_weight", "")
                 enriched["choices_differ"] = last_entry.get("choices_differ", False)
                 enriched["decay_share"] = last_entry.get("decay_share", 0.0)
-                # Rankings de este step
+                # Rankings of this step
                 enriched["rankings"] = {name: last_entry.get(f"rank_{name}", 0) for name in hm.model_names}
                 enriched["rewards"] = {name: last_entry.get(f"reward_{name}", 0) for name in hm.model_names}
 
