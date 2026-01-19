@@ -10,7 +10,7 @@ import { MODEL_COLORS, ALL_MODELS } from "../constants/models";
 import { 
   Play, 
   BarChart3, 
-  Trophy, 
+  Medal, 
   TrendingUp,
   Info,
   AlertTriangle,
@@ -280,10 +280,21 @@ const PredictionPanel = forwardRef((props, ref) => {
 
   const info = useMemo(() => {
     if (!points.length) return { nObs: 0, nPred: 0, nModels: 0, confidence: 0 };
+    
+    // For confidence calculation, always use T+1 data (horizon=1 or no horizon field)
+    // This represents the "standard" system confidence
+    const t1Points = points.filter(p => {
+      // If horizon field doesn't exist, include it (backward compatibility, assume T+1)
+      if (p.horizon === undefined) return true;
+      // Only include T+1 points for confidence calculation
+      return p.horizon === 1;
+    });
+    
+    // For statistics, use all points to show complete data count
     const nObs = points.filter(r => typeof r.var === "number").length;
     const nPred = points.filter(r => typeof r.prediction === "number").length;
     
-  const modelKeys = new Set();
+    const modelKeys = new Set();
     
     for (const p of points) {
       Object.keys(p).forEach(k => {
@@ -293,9 +304,10 @@ const PredictionPanel = forwardRef((props, ref) => {
         }
       });
     }    
-    // Calcular confianza general: (1 - Mean MAPE%)
-    // NOTE: chosen_error_rel and error_rel come from backend as PERCENTAGE (0-100%), not as ratio (0-1)
-    const errorsRel = points
+    
+    // Calcular confianza solo para T+1 (standard performance): (1 - Mean MAPE%)
+    // NOTE: chosen_error_rel and error_rel come from backend as PERCENTAGE (0-100), not as ratio (0-1)
+    const errorsRel = t1Points
       .map(p => p.chosen_error_rel || p.error_rel)
       .filter(e => typeof e === "number" && !isNaN(e) && isFinite(e));
     
@@ -309,10 +321,50 @@ const PredictionPanel = forwardRef((props, ref) => {
     return { nObs, nPred, nModels: modelKeys.size, models: [...modelKeys], confidence };
   }, [points]);
 
+  // Calculate horizon confidence for the selected forecast horizon
+  const horizonConfidence = useMemo(() => {
+    if (forecastHorizon <= 1 || points.length === 0) {
+      return { avgConfidence: 0, count: 0 };
+    }
+
+    const confidences = [];
+    
+    // Create a map of predictions by index (shifted)
+    const predictionsByIndex = new Map();
+    points.forEach((point, idx) => {
+      if (Number.isFinite(point.prediction)) {
+        predictionsByIndex.set(idx + 1, point.prediction);
+      }
+    });
+    
+    // Process points starting from index 1
+    for (let idx = 1; idx < points.length; idx++) {
+      const point = points[idx];
+      const pointHorizon = point.horizon || 1;
+      
+      if (pointHorizon === forecastHorizon) {
+        const predictionAtT = predictionsByIndex.get(idx);
+        const actualAtTplusM = Number.isFinite(point.var) ? point.var : undefined;
+        
+        if (Number.isFinite(predictionAtT) && Number.isFinite(actualAtTplusM)) {
+          const error = Math.abs(predictionAtT - actualAtTplusM);
+          const errorRel = (error / Math.abs(actualAtTplusM)) * 100;
+          const confidence = Math.max(0, Math.min(100, 100 - errorRel));
+          confidences.push(confidence);
+        }
+      }
+    }
+    
+    const avgConfidence = confidences.length > 0
+      ? confidences.reduce((a, b) => a + b, 0) / confidences.length
+      : 0;
+    
+    return { avgConfidence, count: confidences.length };
+  }, [points, forecastHorizon]);
+
   const tabButtons = [
     { id: TABS.DEMO, label: "Demo", icon: Play },
     { id: TABS.GLOBAL_STATS, label: "Complete Analysis", icon: BarChart3 },
-    { id: TABS.MODELS_RANKING, label: "Models Ranking", icon: Trophy },
     { id: TABS.CONFIDENCE_EVOLUTION, label: "Confidence Evolution", icon: TrendingUp },
     { id: TABS.AP1_ZOOM, label: "Zoom Detail", icon: null, hidden: true },
     { id: TABS.VERIFY, label: "Verification", icon: null, hidden: true },
@@ -436,7 +488,7 @@ const PredictionPanel = forwardRef((props, ref) => {
 
                 <div>
                   <h3 style={{ fontSize: 16, marginBottom: 12, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Trophy size={18} style={{ color: '#f59e0b' }} />
+                    <Medal size={18} style={{ color: '#f59e0b' }} />
                     Model Rankings
                   </h3>
                   <AP4MetricsTable data={metricsData} />
@@ -470,38 +522,74 @@ const PredictionPanel = forwardRef((props, ref) => {
                   <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>Modelos Activos</div>
                   <div style={{ fontSize: 24, fontWeight: "bold", color: "#a78bfa" }}>{info.nModels}</div>
                 </div>
-                <div style={{ 
-                  background: "linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%)", 
-                  padding: 16, 
-                  borderRadius: 6, 
-                  border: `2px solid ${info.confidence >= 85 ? "#10b981" : info.confidence >= 75 ? "#f59e0b" : "#ef4444"}`,
-                  gridColumn: "span 2"
-                }}>
-                  <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>
-                    Overall Confidence Score
-                    <span style={{ marginLeft: 8, fontSize: 9, opacity: 0.6 }}>
-                      (1 - Mean Relative Error)
-                    </span>
-                  </div>
+                {forecastHorizon === 1 && (
                   <div style={{ 
-                    fontSize: 32, 
-                    fontWeight: "bold", 
-                    color: info.confidence >= 85 ? "#10b981" : info.confidence >= 75 ? "#f59e0b" : "#ef4444",
-                    fontFamily: "monospace"
+                    background: "linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%)", 
+                    padding: 16, 
+                    borderRadius: 6, 
+                    border: `2px solid ${info.confidence >= 85 ? "#10b981" : info.confidence >= 75 ? "#f59e0b" : "#ef4444"}`,
                   }}>
-                    {info.confidence.toFixed(2)}%
+                    <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>
+                      Overall Confidence Score (T+1 Standard)
+                      <span style={{ marginLeft: 8, fontSize: 9, opacity: 0.6 }}>
+                        (1 - Mean Relative Error)
+                      </span>
+                    </div>
+                    <div style={{ 
+                      fontSize: 32, 
+                      fontWeight: "bold", 
+                      color: info.confidence >= 85 ? "#10b981" : info.confidence >= 75 ? "#f59e0b" : "#ef4444",
+                      fontFamily: "monospace"
+                    }}>
+                      {info.confidence.toFixed(2)}%
+                    </div>
+                    <div style={{ fontSize: 10, opacity: 0.6, marginTop: 4, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      {info.confidence >= 85 ? (
+                        <><CheckCircle size={14} style={{ color: '#10b981' }} /> Excellent accuracy</>
+                      ) : info.confidence >= 75 ? (
+                        <><AlertTriangle size={14} style={{ color: '#f59e0b' }} /> Acceptable accuracy</>
+                      ) : (
+                        <><XCircle size={14} style={{ color: '#ef4444' }} /> Low accuracy</>
+                      )}
+                    </div>
                   </div>
-                  <div style={{ fontSize: 10, opacity: 0.6, marginTop: 4, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    {info.confidence >= 85 ? (
-                      <><CheckCircle size={14} style={{ color: '#10b981' }} /> Excellent accuracy</>
-                    ) : info.confidence >= 75 ? (
-                      <><AlertTriangle size={14} style={{ color: '#f59e0b' }} /> Acceptable accuracy</>
-                    ) : (
-                      <><XCircle size={14} style={{ color: '#ef4444' }} /> Low accuracy</>
-                    )}
+                )}
+              </div>
+              {forecastHorizon > 1 && horizonConfidence.count > 0 && (
+                <div style={{ marginBottom: 24 }}>
+                  <div style={{ 
+                    background: "linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%)", 
+                    padding: 20, 
+                    borderRadius: 6, 
+                    border: `2px solid ${horizonConfidence.avgConfidence >= 85 ? "#10b981" : horizonConfidence.avgConfidence >= 75 ? "#f59e0b" : "#ef4444"}`,
+                    maxWidth: 500
+                  }}>
+                    <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>
+                      Prediction Confidence at T+{forecastHorizon}
+                      <span style={{ marginLeft: 8, fontSize: 9, opacity: 0.6 }}>
+                        (1 - Mean Relative Error)
+                      </span>
+                    </div>
+                    <div style={{ 
+                      fontSize: 32, 
+                      fontWeight: "bold", 
+                      color: horizonConfidence.avgConfidence >= 85 ? "#10b981" : horizonConfidence.avgConfidence >= 75 ? "#f59e0b" : "#ef4444",
+                      fontFamily: "monospace"
+                    }}>
+                      {horizonConfidence.avgConfidence.toFixed(2)}%
+                    </div>
+                    <div style={{ fontSize: 10, opacity: 0.6, marginTop: 4, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      {horizonConfidence.avgConfidence >= 85 ? (
+                        <><CheckCircle size={14} style={{ color: '#10b981' }} /> Excellent accuracy</>
+                      ) : horizonConfidence.avgConfidence >= 75 ? (
+                        <><AlertTriangle size={14} style={{ color: '#f59e0b' }} /> Acceptable accuracy</>
+                      ) : (
+                        <><XCircle size={14} style={{ color: '#ef4444' }} /> Low accuracy</>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
 
               {/* Distribución de modelos elegidos */}
               <div style={{ background: "#1a1a1a", padding: 16, borderRadius: 6, border: "1px solid #333", marginBottom: 24 }}>
@@ -578,7 +666,7 @@ const PredictionPanel = forwardRef((props, ref) => {
               {/* Métricas de rendimiento con panel formal */}
               <div>
                 <h4 style={{ fontSize: 20, marginBottom: 16, color: "#ffffffff", display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Trophy size={24} style={{ color: '#f59e0b' }} />
+                  <Medal size={24} style={{ color: '#f59e0b' }} />
                   Model Performance Rankings
                 </h4>
                 <AP4MetricsTable data={metricsData} />
@@ -601,10 +689,6 @@ const PredictionPanel = forwardRef((props, ref) => {
               forecastHorizon={forecastHorizon}
               horizonData={horizonDataForChart}
             />
-          )}
-
-          {activeTab === TABS.MODELS_RANKING && (
-            <AP4MetricsTable data={metricsData} />
           )}
 
           {activeTab === TABS.VERIFY && (

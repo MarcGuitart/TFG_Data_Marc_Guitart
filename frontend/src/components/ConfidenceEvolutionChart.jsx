@@ -33,13 +33,21 @@ const ConfidenceEvolutionChart = ({ data, forecastHorizon = 1, horizonData = [] 
   const processedData = useMemo(() => {
     if (!data || data.length === 0) return [];
 
-    // Calculate cumulative accuracy for each point
+    // Filter data by forecastHorizon if horizon field exists
+    const filteredData = data.filter(point => {
+      // If horizon field doesn't exist, include all points (backward compatibility)
+      if (point.horizon === undefined) return true;
+      // Otherwise, only include points matching the selected horizon
+      return point.horizon === forecastHorizon;
+    });
+
+    // Calculate cumulative accuracy for each point of the selected horizon
     // NOTE: error_rel_mean comes from backend as PERCENTAGE (0-100), not as ratio (0-1)
     const processed = [];
     let cumulativeErrorSum = 0;
     let validCount = 0;
 
-    data.forEach((point, idx) => {
+    filteredData.forEach((point, idx) => {
       // error_rel_mean is already MAPE in percentage (0-100%)
       const mapePercentage = point.error_rel_mean;
       
@@ -77,20 +85,29 @@ const ConfidenceEvolutionChart = ({ data, forecastHorizon = 1, horizonData = [] 
         const smoothedAccuracy = window.reduce((sum, p) => sum + p.cumulativeAccuracy, 0) / window.length;
         processed[i].cumulativeAccuracySmoothed = parseFloat(smoothedAccuracy.toFixed(2));
         
-        // Also calculate moving average of point accuracy
+        // Also calculate moving average of point accuracy (rolling window)
         const movingAvgAccuracy = window.reduce((sum, p) => sum + p.pointAccuracy, 0) / window.length;
         processed[i].movingAverageAccuracy = parseFloat(movingAvgAccuracy.toFixed(2));
+        
+        // Calculate average confidence (mean of all accuracies from start to current point)
+        const allPointsUpToNow = processed.slice(0, i + 1);
+        const avgConfidence = allPointsUpToNow.reduce((sum, p) => sum + p.pointAccuracy, 0) / allPointsUpToNow.length;
+        processed[i].averageConfidence = parseFloat(avgConfidence.toFixed(2));
       }
     } else {
       // If not enough data points for smoothing, use original values
-      processed.forEach(p => {
+      processed.forEach((p, i) => {
         p.cumulativeAccuracySmoothed = p.cumulativeAccuracy;
         p.movingAverageAccuracy = p.pointAccuracy;
+        // Average confidence up to this point
+        const allPointsUpToNow = processed.slice(0, i + 1);
+        const avgConfidence = allPointsUpToNow.reduce((sum, pt) => sum + pt.pointAccuracy, 0) / allPointsUpToNow.length;
+        p.averageConfidence = parseFloat(avgConfidence.toFixed(2));
       });
     }
 
     return processed;
-  }, [data]);
+  }, [data, forecastHorizon]);
 
   // Calculate T+M confidence evolution data
   // horizonData already contains correct T vs T+M comparison from AP1GlobalChart
@@ -137,26 +154,26 @@ const ConfidenceEvolutionChart = ({ data, forecastHorizon = 1, horizonData = [] 
   const stats = useMemo(() => {
     if (processedData.length === 0) return null;
 
-    // Calculate average accuracy as mean of moving average accuracies
-    const movingAvgAccuracies = processedData.map(p => p.movingAverageAccuracy);
-    const avgAccuracyDirect = movingAvgAccuracies.reduce((sum, acc) => sum + acc, 0) / movingAvgAccuracies.length;
+    // Calculate average accuracy as mean of average confidences
+    const avgConfidences = processedData.map(p => p.averageConfidence);
+    const avgAccuracyDirect = avgConfidences.reduce((sum, acc) => sum + acc, 0) / avgConfidences.length;
 
     const firstHalf = processedData.slice(0, Math.floor(processedData.length / 2));
     const secondHalf = processedData.slice(Math.floor(processedData.length / 2));
 
-    const avgFirst = firstHalf.reduce((sum, p) => sum + p.movingAverageAccuracy, 0) / firstHalf.length;
-    const avgSecond = secondHalf.reduce((sum, p) => sum + p.movingAverageAccuracy, 0) / secondHalf.length;
+    const avgFirst = firstHalf.reduce((sum, p) => sum + p.averageConfidence, 0) / firstHalf.length;
+    const avgSecond = secondHalf.reduce((sum, p) => sum + p.averageConfidence, 0) / secondHalf.length;
     const trend = avgSecond - avgFirst;
 
     const final = processedData[processedData.length - 1];
     const initial = processedData[0];
 
     return {
-      initial: initial.movingAverageAccuracy,
-      final: final.movingAverageAccuracy,
+      initial: initial.averageConfidence,
+      final: final.averageConfidence,
       trend: trend,
-      improvement: final.movingAverageAccuracy - initial.movingAverageAccuracy,
-      avgAccuracy: avgAccuracyDirect, // Use direct average of moving average accuracies
+      improvement: final.averageConfidence - initial.averageConfidence,
+      avgAccuracy: avgAccuracyDirect, // Use direct average of average confidences
     };
   }, [processedData]);
 
@@ -207,8 +224,8 @@ const ConfidenceEvolutionChart = ({ data, forecastHorizon = 1, horizonData = [] 
           <div style={{ color: "#60a5fa", marginBottom: 4 }}>
             <strong>Point Accuracy:</strong> {data.pointAccuracy}%
           </div>
-          <div style={{ color: "#a78bfa", marginBottom: 4 }}>
-            <strong>Moving Average Accuracy:</strong> {data.movingAverageAccuracy}%
+          <div style={{ color: "#10b981", marginBottom: 4 }}>
+            <strong>Average Confidence:</strong> {data.averageConfidence}%
           </div>
         </div>
       );
@@ -230,11 +247,10 @@ const ConfidenceEvolutionChart = ({ data, forecastHorizon = 1, horizonData = [] 
       <div style={{ marginBottom: 16 }}>
         <h3 style={{ fontSize: 18, marginBottom: 8, color: "#fff", display: 'flex', alignItems: 'center', gap: '8px' }}>
           <TrendingUp size={22} />
-          Confidence Evolution Over Time
+          Confidence Evolution Over Time (T+{forecastHorizon})
         </h3>
         <p style={{ fontSize: 13, color: "#ffffffff", marginBottom: 16 }}>
-          Shows how the system's prediction accuracy evolves as more data arrives. 
-          The cumulative accuracy represents the overall performance up to each point.
+          Shows how the system's prediction accuracy evolves as more data arrives for T+{forecastHorizon} horizon. 
         </p>
       </div>
 
@@ -393,11 +409,11 @@ const ConfidenceEvolutionChart = ({ data, forecastHorizon = 1, horizonData = [] 
             />
             <Line
               type="monotone"
-              dataKey="movingAverageAccuracy"
-              stroke="#a78bfa"
+              dataKey="averageConfidence"
+              stroke="#10b981"
               strokeWidth={3}
               dot={false}
-              name="Moving Average Accuracy"
+              name="Average Confidence"
             />
           </ComposedChart>
         </ResponsiveContainer>
@@ -425,8 +441,8 @@ const ConfidenceEvolutionChart = ({ data, forecastHorizon = 1, horizonData = [] 
             accuracy at each data point (more volatile)
           </li>
           <li>
-            <strong style={{ color: "#a78bfa" }}>Moving Average Accuracy (purple):</strong> Smoothed
-            accuracy using a rolling window to show trends
+            <strong style={{ color: "#10b981" }}>Average Confidence (green):</strong> Overall average
+            accuracy from the beginning to current point (shows long-term trend)
           </li>
           <li>
             <strong style={{ color: "#10b981" }}>Green zone (≥85%):</strong> Excellent prediction
@@ -442,164 +458,10 @@ const ConfidenceEvolutionChart = ({ data, forecastHorizon = 1, horizonData = [] 
           </li>
         </ul>
         <div style={{ marginTop: 12, fontSize: 11, opacity: 0.7, fontStyle: "italic" }}>
-          A stabilizing moving average accuracy line indicates the system has "learned" the data
-          patterns. An upward trend shows the adaptive ensemble is improving over time.
+          A stabilizing or upward-trending average confidence line indicates the system is learning
+          and improving over time. The green line shows if the overall performance is increasing or decreasing.
         </div>
       </div>
-
-      {/* T+M Confidence Evolution Chart */}
-      {forecastHorizon > 1 && horizonProcessedData.length > 0 && (
-        <div style={{ marginTop: 40 }}>
-          <div style={{ marginBottom: 16 }}>
-            <h3 style={{ fontSize: 18, marginBottom: 8, color: "#fff", display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <TrendingUp size={22} />
-              Confidence Evolution for T+{forecastHorizon}
-            </h3>
-            <p style={{ fontSize: 13, color: "#aaa", marginBottom: 16 }}>
-              Shows the prediction confidence evolution for {forecastHorizon}-step ahead forecasting.
-              Compares actual values at T+{forecastHorizon} with predictions made at T.
-            </p>
-          </div>
-
-          {/* Statistics Cards for T+M */}
-          {horizonStats && (
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                gap: 12,
-                marginBottom: 24,
-              }}
-            >
-              <div
-                style={{
-                  background: "#1a1a1a",
-                  padding: 16,
-                  borderRadius: 6,
-                  border: "1px solid #333",
-                }}
-              >
-                <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>
-                  Initial Accuracy (T+{forecastHorizon})
-                </div>
-                <div
-                  style={{
-                    fontSize: 24,
-                    fontWeight: "bold",
-                    color: horizonStats.initial >= 85 ? "#10b981" : horizonStats.initial >= 75 ? "#f59e0b" : "#ef4444",
-                  }}
-                >
-                  {horizonStats.initial.toFixed(2)}%
-                </div>
-              </div>
-
-              <div
-                style={{
-                  background: "#1a1a1a",
-                  padding: 16,
-                  borderRadius: 6,
-                  border: "1px solid #333",
-                }}
-              >
-                <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>
-                  Final Accuracy (T+{forecastHorizon})
-                </div>
-                <div
-                  style={{
-                    fontSize: 24,
-                    fontWeight: "bold",
-                    color: horizonStats.final >= 85 ? "#10b981" : horizonStats.final >= 75 ? "#f59e0b" : "#ef4444",
-                  }}
-                >
-                  {horizonStats.final.toFixed(2)}%
-                </div>
-              </div>
-
-              <div
-                style={{
-                  background: "#1a1a1a",
-                  padding: 16,
-                  borderRadius: 6,
-                  border: "1px solid #333",
-                }}
-              >
-                <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>
-                  Average Accuracy (T+{forecastHorizon})
-                </div>
-                <div
-                  style={{
-                    fontSize: 24,
-                    fontWeight: "bold",
-                    color: horizonStats.avgAccuracy >= 85 ? "#10b981" : horizonStats.avgAccuracy >= 75 ? "#f59e0b" : "#ef4444",
-                  }}
-                >
-                  {horizonStats.avgAccuracy.toFixed(2)}%
-                </div>
-              </div>
-
-              <div
-                style={{
-                  background: "#1a1a1a",
-                  padding: 16,
-                  borderRadius: 6,
-                  border: "1px solid #333",
-                }}
-              >
-                <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>
-                  Trend (T+{forecastHorizon})
-                </div>
-                <div
-                  style={{
-                    fontSize: 24,
-                    fontWeight: "bold",
-                    color: horizonStats.trend > 0 ? "#10b981" : horizonStats.trend < 0 ? "#ef4444" : "#999",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                  }}
-                >
-                  {horizonStats.trend > 0 ? <TrendingUp size={18} /> : <TrendingDown size={18} />}
-                  {horizonStats.trend.toFixed(2)}%
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* T+M Chart */}
-          <div style={{ width: "100%", height: 350, marginBottom: 16 }}>
-            <ResponsiveContainer>
-              <ComposedChart data={horizonProcessedData} margin={{ top: 10, right: 30, bottom: 10, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
-                <XAxis dataKey="index" label={{ value: `Data Points (T+${forecastHorizon})`, position: "insideBottomRight", offset: -5 }} />
-                <YAxis domain={[0, 100]} label={{ value: "Accuracy (%)", angle: -90, position: "insideLeft" }} />
-                <Tooltip content={<CustomTooltip />} />
-                <Legend />
-
-                <ReferenceLine y={85} stroke="#10b981" strokeDasharray="3 3" label={{ value: "Excellent (85%)", position: "right", fill: "#10b981", fontSize: 11 }} />
-                <ReferenceLine y={75} stroke="#f59e0b" strokeDasharray="3 3" label={{ value: "Acceptable (75%)", position: "right", fill: "#f59e0b", fontSize: 11 }} />
-
-                <Line
-                  type="monotone"
-                  dataKey="pointAccuracy"
-                  stroke="#60a5fa"
-                  strokeWidth={1.5}
-                  dot={false}
-                  name={`Point Accuracy (T+${forecastHorizon})`}
-                  opacity={0.4}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="movingAverageAccuracy"
-                  stroke="#a78bfa"
-                  strokeWidth={3}
-                  dot={false}
-                  name={`Moving Average Accuracy (T+${forecastHorizon})`}
-                />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

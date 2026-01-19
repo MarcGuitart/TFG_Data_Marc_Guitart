@@ -491,7 +491,6 @@ export default function AP1GlobalChart({ data = [], rawData = [], forecastHorizo
           <p style={{ fontSize: 12, color: "#ffffffff" }}>
             Shows all model predictions made at time T (for T+{forecastHorizon}) vs actual value at T+{forecastHorizon} (blue).
             This represents {forecastHorizon} steps ahead forecasting ({(forecastHorizon * 30) % 1440 === 0 ? Math.floor(forecastHorizon * 30 / 60) : forecastHorizon * 30} minutes).
-            Shaded area shows average confidence bounds (±1 std dev, error={horizonData._avgError?.toFixed(2)}).
           </p>
 
           <div style={{ width: "100%", height: 350 * zoomY, overflow: "auto" }}>
@@ -544,40 +543,7 @@ export default function AP1GlobalChart({ data = [], rawData = [], forecastHorizo
             </ResponsiveContainer>
           </div>
 
-          {/* Confidence Score Card for T+M */}
-          <div style={{ marginTop: 24 }}>
-            <div style={{ 
-              background: "linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%)", 
-              padding: 20, 
-              borderRadius: 6, 
-              border: `2px solid ${horizonData._avgConfidence >= 85 ? "#10b981" : horizonData._avgConfidence >= 75 ? "#f59e0b" : "#ef4444"}`,
-              maxWidth: 500
-            }}>
-              <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>
-                Prediction Confidence at T+{forecastHorizon}
-                <span style={{ marginLeft: 8, fontSize: 9, opacity: 0.6 }}>
-                  (1 - Mean Relative Error)
-                </span>
-              </div>
-              <div style={{ 
-                fontSize: 32, 
-                fontWeight: "bold", 
-                color: horizonData._avgConfidence >= 85 ? "#10b981" : horizonData._avgConfidence >= 75 ? "#f59e0b" : "#ef4444",
-                fontFamily: "monospace"
-              }}>
-                {horizonData._avgConfidence.toFixed(2)}%
-              </div>
-              <div style={{ fontSize: 10, opacity: 0.6, marginTop: 4, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                {horizonData._avgConfidence >= 85 ? (
-                  <><CheckCircle size={14} style={{ color: '#10b981' }} /> Excellent accuracy</>
-                ) : horizonData._avgConfidence >= 75 ? (
-                  <><AlertTriangle size={14} style={{ color: '#f59e0b' }} /> Acceptable accuracy</>
-                ) : (
-                  <><XCircle size={14} style={{ color: '#ef4444' }} /> Low accuracy</>
-                )}
-              </div>
-            </div>
-          </div>
+          {/* Confidence card removed here (moved to PredictionPanel) */}
         </div>
       )}
     </div>

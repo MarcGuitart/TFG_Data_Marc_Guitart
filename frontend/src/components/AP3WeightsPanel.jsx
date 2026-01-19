@@ -3,7 +3,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, ReferenceLine
 } from "recharts";
-import { CheckCircle, XCircle, AlertTriangle, TrendingUp, BarChart3, Lightbulb } from 'lucide-react';
+import { CheckCircle, XCircle, AlertTriangle, TrendingUp, BarChart3, Lightbulb, Medal } from 'lucide-react';
 
 const API_BASE = "http://localhost:8081";
 
@@ -448,9 +448,13 @@ export default function AP3WeightsPanel({ selectedId }) {
                         <td style={{ 
                           padding: 8, 
                           color: MODEL_COLORS[model] || "#ccc",
-                          fontWeight: 600
+                          fontWeight: 600,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
                         }}>
-                          {idx === 0 && "🥇 "}{model}
+                          {idx === 0 && <Medal size={16} style={{ color: "#FFD700" }} />}
+                          {model}
                         </td>
                         <td style={{ padding: 8, textAlign: "right" }}>
                           <strong>{s.final_weight?.toFixed(2) ?? "-"}</strong>
