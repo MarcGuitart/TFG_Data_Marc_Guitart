@@ -63,24 +63,24 @@ This project is part of a Bachelor's Thesis in Computer Engineering, focused on:
 - **Exponential decay memory**: Greater weight to recent predictions
 - **History export**: Complete CSV with weight evolution
 
-### Multi-Perspective Analysis (AP1-AP4)
+### Multi-Perspective Analysis 
 
-1. **AP1 - Global Chart**: Complete visualization of predictions vs observations
+1. **Global Chart**: Complete visualization of predictions vs observations
    - Main chart with independent X/Y zoom
    - View by horizon (T+1, T+M)
    - Confidence intervals
 
-2. **AP2 - Adaptive Selector**: Detailed table of agent decisions
+2. **Adaptive Selector**: Detailed table of agent decisions
    - Model chosen at each instant
    - Point-wise relative error
    - Real vs predicted values
 
-3. **AP3 - Weight Evolution**: Temporal graphs of the memory system
+3. **Weight Evolution**: Temporal graphs of the memory system
    - Weight evolution by model
    - Cumulative statistics
    - Comparison chosen_by_error vs chosen_by_weight
 
-4. **AP4 - Model Ranking**: Table with MAE, RMSE, MAPE metrics
+4. **Model Ranking**: Table with MAE, RMSE, MAPE metrics
    - Top-3 models highlighted
    - Cumulative final weight
    - Mean relative error
@@ -454,7 +454,7 @@ GET /api/metrics/models/ranked?id={id}&start={start}
 GET /api/selector?id={id}&hours={hours}
 ```
 
-#### Agent and Weights (AP3)
+#### Agent and Weights
 
 ```http
 GET  /api/agent/weights/{unit_id}
@@ -501,28 +501,28 @@ POST /reset/{unit_id}      # Reset memory
 
 ## Visualizations
 
-### AP1 - Global Chart
+### Global Chart
 
 - Complete chart of observations vs predictions
 - Independent X/Y zoom
 - Visualization by horizon (T+1, T+20, etc.)
 - Confidence intervals
 
-### AP2 - Adaptive Selector
+### Adaptive Selector
 
 - Table with step-by-step decisions
 - Model chosen at each instant
 - Point-wise relative error
 - Real vs predicted values
 
-### AP3 - Weight Evolution
+### Weight Evolution
 
 - Temporal chart of weights per model
 - Cumulative statistics table
 - Comparison chosen_by_error vs chosen_by_weight
 - History export
 
-### AP4 - Model Ranking
+### Model Ranking
 
 - Top-3 models with badges
 - MAE, RMSE, MAPE metrics
