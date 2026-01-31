@@ -1,4 +1,4 @@
-# 🤖 Sistema Adaptativo de Predicción Multi-Horizonte con Agente Inteligente
+# 🤖 Adaptive Multi-Horizon Forecasting System with Intelligent Agent
 
 [![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://www.python.org/)
 [![React](https://img.shields.io/badge/React-18.0+-61DAFB.svg?logo=react)](https://reactjs.org/)
@@ -6,109 +6,124 @@
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED.svg?logo=docker)](https://www.docker.com/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-> **Trabajo de Fin de Grado (TFG)** - Sistema inteligente de predicción de series temporales con selección adaptativa de modelos basada en memoria y aprendizaje continuo.
+> **Bachelor's Thesis Project** - Intelligent time series forecasting system with adaptive model selection based on memory and continuous learning.
 
 ---
 
-## 📋 Tabla de Contenidos
+## 📋 Table of Contents
 
-- [Descripción](#-descripción)
-- [Características Principales](#-características-principales)
-- [Arquitectura del Sistema](#-arquitectura-del-sistema)
-- [Tecnologías Utilizadas](#-tecnologías-utilizadas)
-- [Requisitos Previos](#-requisitos-previos)
-- [Instalación](#-instalación)
-- [Uso](#-uso)
-- [Estructura del Proyecto](#-estructura-del-proyecto)
+- [Description](#-description)
+- [Key Features](#-key-features)
+- [System Architecture](#-system-architecture)
+- [Technologies Used](#-technologies-used)
+- [Prerequisites](#-prerequisites)
+- [Installation](#-installation)
+- [Usage](#-usage)
+- [Project Structure](#-project-structure)
 - [API Endpoints](#-api-endpoints)
-- [Visualizaciones](#-visualizaciones)
-- [Configuración Avanzada](#-configuración-avanzada)
+- [Visualizations](#-visualizations)
+- [Advanced Configuration](#-advanced-configuration)
 - [Testing](#-testing)
-- [Contribución](#-contribución)
-- [Licencia](#-licencia)
-- [Autor](#-autor)
+- [Contributing](#-contributing)
+- [License](#-license)
+- [Author](#-author)
 
 ---
 
-## 🎯 Descripción
+## 🎯 Description
 
-Este proyecto implementa un **sistema adaptativo de predicción de series temporales** que combina múltiples modelos de forecasting (Linear Regression, Polynomial, Alpha-Beta, Kalman Filter) con un agente inteligente que selecciona dinámicamente el mejor modelo en cada instante.
+This project implements an **adaptive time series forecasting system** that combines multiple forecasting models (Linear Regression, Polynomial, Alpha-Beta, Kalman Filter) with an intelligent agent that dynamically selects the best model at each instant.
 
-El sistema utiliza un **mecanismo de memoria con pesos** que aprende continuamente del rendimiento histórico de cada modelo, permitiendo:
+The system uses a **weight-based memory mechanism** that continuously learns from the historical performance of each model, enabling:
 
-- 🔮 **Predicciones multi-horizonte**: Desde T+1 hasta T+200 (configurable)
-- 🧠 **Selección adaptativa**: El agente elige el modelo óptimo en tiempo real
-- 📊 **Sistema de ranking**: Modelos clasificados por desempeño acumulado
-- 🎯 **Memoria con decay**: Los pesos evolucionan según el rendimiento reciente
-- 📈 **Visualización en tiempo real**: Dashboard interactivo con React
-- 🔄 **Pipeline streaming**: Procesamiento continuo con Kafka
+- 🔮 **Multi-horizon predictions**: From T+1 to T+200 (configurable)
+- 🧠 **Adaptive selection**: The agent chooses the optimal model in real-time
+- 📊 **Ranking system**: Models classified by cumulative performance
+- 🎯 **Memory with decay**: Weights evolve based on recent performance
+- 📈 **Real-time visualization**: Interactive dashboard with React
+- 🔄 **Streaming pipeline**: Continuous processing with Kafka
 
-### 🎓 Contexto Académico
+### 🎓 Academic Context
 
-Este proyecto forma parte de un Trabajo de Fin de Grado en Ingeniería Informática, enfocado en:
-- Sistemas multi-agente
-- Machine Learning aplicado a series temporales
-- Arquitecturas de microservicios
-- Procesamiento de datos en streaming
-- Visualización de datos científicos
+This project is part of a Bachelor's Thesis in Computer Engineering, focused on:
+- Multi-agent systems
+- Machine Learning applied to time series
+- Microservices architectures
+- Streaming data processing
+- Scientific data visualization
 
 ---
 
-## ✨ Características Principales
+## ✨ Key Features
 
-### 🤖 Agente Inteligente con Memoria
+### 🤖 Intelligent Agent with Memory
 
-- **Sistema de pesos dinámico**: Cada modelo acumula puntos según su desempeño
-- **Ranking adaptativo**: Top-3 modelos con indicadores visuales
-- **Memoria con decay exponencial**: Mayor peso a predicciones recientes
-- **Exportación de historial**: CSV completo con evolución de pesos
+- **Dynamic weight system**: Each model accumulates points based on its performance
+- **Adaptive ranking**: Top-3 models with visual indicators (Trophy, Medal, Award icons)
+- **Exponential decay memory**: Greater weight to recent predictions
+- **History export**: Complete CSV with weight evolution
 
-### 📊 Análisis Multi-Perspectiva (AP1-AP4)
+### 📊 Multi-Perspective Analysis (AP1-AP4)
 
-1. **AP1 - Global Chart**: Visualización completa de predicciones vs observaciones
-2. **AP2 - Selector Adaptativo**: Tabla detallada de decisiones del agente
-3. **AP3 - Evolución de Pesos**: Gráficos temporales del sistema de memoria
-4. **AP4 - Ranking de Modelos**: Tabla con métricas MAE, RMSE, MAPE
+1. **AP1 - Global Chart**: Complete visualization of predictions vs observations
+   - Main chart with independent X/Y zoom
+   - View by horizon (T+1, T+M)
+   - Confidence intervals
 
-### 🎯 Predicción Multi-Horizonte
+2. **AP2 - Adaptive Selector**: Detailed table of agent decisions
+   - Model chosen at each instant
+   - Point-wise relative error
+   - Real vs predicted values
 
-- Configuración flexible de horizonte: 1 a 200 pasos adelante
-- Cada paso = 30 minutos de forecast
-- Visualización simultánea de múltiples horizontes
-- Intervalos de confianza por horizonte
+3. **AP3 - Weight Evolution**: Temporal graphs of the memory system
+   - Weight evolution by model
+   - Cumulative statistics
+   - Comparison chosen_by_error vs chosen_by_weight
 
-### 📈 Métricas Avanzadas
+4. **AP4 - Model Ranking**: Table with MAE, RMSE, MAPE metrics
+   - Top-3 models highlighted
+   - Cumulative final weight
+   - Mean relative error
+
+### 🎯 Multi-Horizon Prediction
+
+- Flexible horizon configuration: 1 to 200 steps ahead
+- Each step = 30 minutes of forecast
+- Simultaneous visualization of multiple horizons
+- Confidence intervals per horizon
+
+### 📈 Advanced Metrics
 
 - **MAE** (Mean Absolute Error)
 - **RMSE** (Root Mean Square Error)
 - **MAPE** (Mean Absolute Percentage Error)
-- **Error Relativo Medio** (%)
-- **Confianza por horizonte**: 1 - MAPE
-- **Moving Average Accuracy**: Suavizado con ventana móvil
+- **Mean Relative Error** (%)
+- **Confidence per horizon**: 1 - MAPE
+- **Moving Average Accuracy**: Smoothing with moving window
 
-### 🔄 Pipeline de Datos en Streaming
+### 🔄 Streaming Data Pipeline
 
-- **Kafka**: Colas de mensajería para datos en tiempo real
-- **InfluxDB**: Base de datos de series temporales
-- **Window Loader**: Carga de datos por ventanas
-- **Window Collector**: Recolección de predicciones y métricas
+- **Kafka**: Message queues for real-time data
+- **InfluxDB**: Time series database
+- **Window Loader**: Window-based data loading
+- **Window Collector**: Collection of predictions and metrics
 
 ---
 
-## 🏗️ Arquitectura del Sistema
+## 🏗️ System Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                        FRONTEND (React)                      │
-│  Dashboard Interactivo con Visualizaciones (Recharts)       │
+│      Interactive Dashboard with Visualizations (Recharts)   │
 └────────────────────┬────────────────────────────────────────┘
                      │ HTTP/REST API
 ┌────────────────────▼────────────────────────────────────────┐
 │                   ORCHESTRATOR (FastAPI)                     │
-│  • Gestión de endpoints principales                          │
-│  • Análisis de métricas                                      │
-│  • Gestión de escenarios                                     │
-│  • Proxy a servicios                                         │
+│  • Main endpoint management                                  │
+│  • Metrics analysis                                          │
+│  • Scenario management                                       │
+│  • Services proxy                                            │
 └─┬────────────────┬──────────────────┬───────────────────────┘
   │                │                  │
   ▼                ▼                  ▼
@@ -116,8 +131,8 @@ Este proyecto forma parte de un Trabajo de Fin de Grado en Ingeniería Informát
 │  AGENT    │  │WINDOW_LOADER │  │WINDOW_COLLECTOR│
 │ (Python)  │  │   (Python)   │  │    (Python)    │
 │           │  │              │  │                │
-│ • Modelos │  │ • Carga CSV  │  │ • Recolecta    │
-│ • Pesos   │  │ • Kafka      │  │   predicciones │
+│ • Models  │  │ • CSV Load   │  │ • Collect      │
+│ • Weights │  │ • Kafka      │  │   predictions  │
 │ • Ranking │  │   Producer   │  │ • InfluxDB     │
 └─────┬─────┘  └──────┬───────┘  └────────┬───────┘
       │               │                   │
@@ -134,118 +149,118 @@ Este proyecto forma parte de un Trabajo de Fin de Grado en Ingeniería Informát
               └──────────────┘
 ```
 
-### Flujo de Datos
+### Data Flow
 
-1. **Carga**: Window Loader lee CSV y publica en Kafka
-2. **Predicción**: Agent procesa cada punto, genera predicciones multi-horizonte
-3. **Recolección**: Window Collector almacena en InfluxDB
-4. **Análisis**: Orchestrator consulta métricas y expone API
-5. **Visualización**: Frontend consume API y muestra dashboards interactivos
+1. **Loading**: Window Loader reads CSV and publishes to Kafka
+2. **Prediction**: Agent processes each point, generates multi-horizon predictions
+3. **Collection**: Window Collector stores in InfluxDB
+4. **Analysis**: Orchestrator queries metrics and exposes API
+5. **Visualization**: Frontend consumes API and displays interactive dashboards
 
 ---
 
-## 🛠️ Tecnologías Utilizadas
+## 🛠️ Technologies Used
 
 ### Backend
 
-- **Python 3.9+**: Lenguaje principal
-- **FastAPI**: Framework web asíncrono
-- **Pandas / NumPy**: Procesamiento de datos
-- **Scikit-learn**: Modelos de ML
-- **Kafka-Python**: Cliente de Apache Kafka
-- **InfluxDB-Client**: Cliente de InfluxDB
-- **Pydantic**: Validación de datos
+- **Python 3.9+**: Primary language
+- **FastAPI**: Asynchronous web framework
+- **Pandas / NumPy**: Data processing
+- **Scikit-learn**: ML models
+- **Kafka-Python**: Apache Kafka client
+- **InfluxDB-Client**: InfluxDB client
+- **Pydantic**: Data validation
 
 ### Frontend
 
-- **React 18**: Framework UI
-- **Vite**: Build tool y dev server
-- **Recharts**: Gráficos y visualizaciones
-- **Lucide React**: Iconos SVG
-- **Axios**: Cliente HTTP
+- **React 18**: UI framework
+- **Vite**: Build tool and dev server
+- **Recharts**: Charts and visualizations
+- **Lucide React**: SVG icons
+- **Axios**: HTTP client
 
-### Infraestructura
+### Infrastructure
 
-- **Docker & Docker Compose**: Orquestación de contenedores
-- **Apache Kafka**: Streaming de datos
-- **InfluxDB 2.x**: Base de datos de series temporales
-- **Nginx** (opcional): Reverse proxy
+- **Docker & Docker Compose**: Container orchestration
+- **Apache Kafka**: Data streaming
+- **InfluxDB 2.x**: Time series database
+- **Nginx** (optional): Reverse proxy
 
 ---
 
-## 📦 Requisitos Previos
+## 📦 Prerequisites
 
-### Software Necesario
+### Required Software
 
-- **Docker Desktop** 4.0+ ([Descargar](https://www.docker.com/products/docker-desktop))
+- **Docker Desktop** 4.0+ ([Download](https://www.docker.com/products/docker-desktop))
 - **Docker Compose** 2.0+
-- **Git** ([Descargar](https://git-scm.com/))
+- **Git** ([Download](https://git-scm.com/))
 
-### Hardware Recomendado
+### Recommended Hardware
 
-- **RAM**: 8 GB mínimo (16 GB recomendado)
-- **Disco**: 10 GB libres
-- **CPU**: 4 cores (para ejecución óptima)
+- **RAM**: 8 GB minimum (16 GB recommended)
+- **Disk**: 10 GB free space
+- **CPU**: 4 cores (for optimal execution)
 
-### Opcional (para desarrollo local sin Docker)
+### Optional (for local development without Docker)
 
 - **Node.js** 18+ & npm 9+
 - **Python** 3.9+ & pip
-- **Make** (para comandos simplificados)
+- **Make** (for simplified commands)
 
 ---
 
-## 🚀 Instalación
+## 🚀 Installation
 
-### 1. Clonar el Repositorio
+### 1. Clone the Repository
 
 ```bash
 git clone https://github.com/MarcGuitart/TFG_Data_Marc_Guitart.git
 cd TFG_Data_Marc_Guitart
 ```
 
-### 2. Configurar Variables de Entorno
+### 2. Configure Environment Variables
 
 ```bash
-# Copiar archivo de ejemplo
+# Copy example file
 cp config/app.env.example config/app.env
 
-# Editar si es necesario (valores por defecto funcionan con Docker)
+# Edit if necessary (default values work with Docker)
 nano config/app.env
 ```
 
-### 3. Levantar el Sistema con Docker
+### 3. Start the System with Docker
 
 ```bash
-# Construir imágenes y levantar servicios
+# Build images and start services
 docker-compose -f docker/docker-compose.yml up --build
 
-# O en segundo plano (detached)
+# Or in detached mode (background)
 docker-compose -f docker/docker-compose.yml up -d --build
 ```
 
-### 4. Verificar que los Servicios están Activos
+### 4. Verify Services are Running
 
 ```bash
-# Ver logs
+# View logs
 docker-compose -f docker/docker-compose.yml logs -f
 
-# Verificar contenedores
+# Check containers
 docker ps
 ```
 
-Deberías ver estos servicios corriendo:
-- `agent` (puerto 8090)
-- `orchestrator` (puerto 8081)
-- `window_loader` (puerto 8083)
-- `window_collector` (puerto 8082)
-- `kafka` (puerto 9092)
-- `influxdb` (puerto 8086)
-- `frontend` (puerto 5173)
+You should see these services running:
+- `agent` (port 8090)
+- `orchestrator` (port 8081)
+- `window_loader` (port 8083)
+- `window_collector` (port 8082)
+- `kafka` (port 9092)
+- `influxdb` (port 8086)
+- `frontend` (port 5173)
 
-### 5. Acceder a la Aplicación
+### 5. Access the Application
 
-Abre tu navegador en:
+Open your browser at:
 
 ```
 http://localhost:5173
@@ -253,158 +268,158 @@ http://localhost:5173
 
 ---
 
-## 🎮 Uso
+## 🎮 Usage
 
-### Flujo Básico de Trabajo
+### Basic Workflow
 
-#### 1. Cargar Datos
+#### 1. Load Data
 
-Desde la UI web:
+From the web UI:
 
-1. Ve a la sección **"Upload CSV"**
-2. Selecciona un archivo CSV con formato:
+1. Go to the **"Upload CSV"** section
+2. Select a CSV file with format:
    ```csv
    timestamp,value,unit_id
    2025-01-01 00:00:00,0.123,unit_01
    2025-01-01 00:30:00,0.145,unit_01
    ...
    ```
-3. Haz clic en **"Upload"**
+3. Click **"Upload"**
 
-O usa los datos de ejemplo incluidos:
+Or use the included example data:
 
 ```bash
-# Los datos de ejemplo están en /data/ (ignorados por git)
-# Puedes cargar: demo_final.csv, test_complete.csv, etc.
+# Example data is in /data/ (ignored by git)
+# You can load: demo_final.csv, test_complete.csv, etc.
 ```
 
-#### 2. Configurar Horizonte de Predicción
+#### 2. Configure Prediction Horizon
 
-En el panel de control:
+In the control panel:
 
-- **Selector de Horizonte**: Elige de 1 a 200 pasos
-- **Speed**: Velocidad de procesamiento (0 = máxima velocidad)
-- **Source**: Archivo CSV a procesar
+- **Horizon Selector**: Choose from 1 to 200 steps
+- **Speed**: Processing speed (0 = maximum speed)
+- **Source**: CSV file to process
 
-#### 3. Ejecutar Predicción
+#### 3. Run Prediction
 
 ```bash
-# Desde la UI: botón "Run Window"
+# From UI: "Run Window" button
 
-# O vía API:
+# Or via API:
 curl -X POST "http://localhost:8081/api/run_window?source=demo_final.csv&speed_ms=0&forecast_horizon=20"
 ```
 
-#### 4. Explorar Resultados
+#### 4. Explore Results
 
-- **Demo Tab**: Vista rápida con predicciones y métricas
-- **Complete Analysis**: Análisis detallado con todos los horizontes
-- **Confidence Evolution**: Evolución temporal de la confianza
-- **AP2 Selector**: Tabla de decisiones del agente
-- **AP3 Weights**: Evolución de pesos por modelo
-- **AP4 Ranking**: Tabla Top-3 con métricas globales
+- **Demo Tab**: Quick view with predictions and metrics
+- **Complete Analysis**: Detailed analysis with all horizons
+- **Confidence Evolution**: Temporal evolution of confidence
+- **AP2 Selector**: Agent decision table
+- **AP3 Weights**: Weight evolution by model
+- **AP4 Ranking**: Top-3 table with global metrics
 
-#### 5. Exportar Resultados
+#### 5. Export Results
 
 ```bash
-# Exportar historial de pesos
+# Export weight history
 curl -X POST "http://localhost:8081/api/agent/export_csv/unit_01"
 
-# Descargar CSV
+# Download CSV
 curl "http://localhost:8081/api/download_weights/unit_01" -o weights_history.csv
 ```
 
-### Comandos Útiles con Make
+### Useful Make Commands
 
 ```bash
-# Ver ayuda
+# View help
 make help
 
-# Levantar servicios
+# Start services
 make up
 
-# Ver logs
+# View logs
 make logs
 
-# Parar servicios
+# Stop services
 make down
 
-# Limpiar todo (volúmenes incluidos)
+# Clean everything (including volumes)
 make clean
 
-# Reconstruir desde cero
+# Rebuild from scratch
 make rebuild
 ```
 
 ---
 
-## 📁 Estructura del Proyecto
+## 📁 Project Structure
 
 ```
 TFG_Agente_Data/
-├── 📄 README.md                    # Este archivo
-├── 📄 docker-compose.yml           # Orquestación de servicios
-├── 📄 Makefile                     # Comandos simplificados
-├── 📄 .gitignore                   # Archivos ignorados por Git
+├── 📄 README.md                    # This file
+├── 📄 docker-compose.yml           # Service orchestration
+├── 📄 Makefile                     # Simplified commands
+├── 📄 .gitignore                   # Files ignored by Git
 │
-├── 📁 services/                    # Microservicios backend
-│   ├── 📁 agent/                   # Agente inteligente con modelos
+├── 📁 services/                    # Backend microservices
+│   ├── 📁 agent/                   # Intelligent agent with models
 │   │   ├── app.py                  # FastAPI app
-│   │   ├── models.py               # Implementación de modelos
-│   │   ├── memory_system.py       # Sistema de pesos y ranking
+│   │   ├── models.py               # Model implementations
+│   │   ├── memory_system.py       # Weight and ranking system
 │   │   └── Dockerfile
 │   │
-│   ├── 📁 orchestrator/            # Servicio principal (API)
-│   │   ├── app.py                  # Endpoints principales
-│   │   ├── scenarios.py            # Gestión de escenarios
+│   ├── 📁 orchestrator/            # Main service (API)
+│   │   ├── app.py                  # Main endpoints
+│   │   ├── scenarios.py            # Scenario management
 │   │   └── Dockerfile
 │   │
-│   ├── 📁 window_loader/           # Carga de datos en Kafka
+│   ├── 📁 window_loader/           # Kafka data loading
 │   │   ├── app.py
 │   │   └── Dockerfile
 │   │
-│   ├── 📁 window_collector/        # Recolección en InfluxDB
+│   ├── 📁 window_collector/        # InfluxDB collection
 │   │   ├── app.py
 │   │   └── Dockerfile
 │   │
-│   └── 📁 common/                  # Utilidades compartidas
+│   └── 📁 common/                  # Shared utilities
 │       └── utils.py
 │
-├── 📁 frontend/                    # Aplicación React
+├── 📁 frontend/                    # React application
 │   ├── 📁 src/
-│   │   ├── 📁 components/          # Componentes React
-│   │   │   ├── AP1GlobalChart.jsx  # Gráfico global
-│   │   │   ├── AP2SelectorTable.jsx # Tabla selector
-│   │   │   ├── AP3WeightsPanel.jsx # Panel de pesos
-│   │   │   ├── AP4MetricsTable.jsx # Ranking de modelos
-│   │   │   ├── PredictionPanel.jsx # Panel principal
+│   │   ├── 📁 components/          # React components
+│   │   │   ├── AP1GlobalChart.jsx  # Global chart
+│   │   │   ├── AP2SelectorTable.jsx # Selector table
+│   │   │   ├── AP3WeightsPanel.jsx # Weights panel
+│   │   │   ├── AP4MetricsTable.jsx # Model ranking
+│   │   │   ├── PredictionPanel.jsx # Main panel
 │   │   │   └── ...
-│   │   ├── App.jsx                 # Componente raíz
-│   │   └── main.jsx                # Punto de entrada
+│   │   ├── App.jsx                 # Root component
+│   │   └── main.jsx                # Entry point
 │   ├── package.json
 │   ├── vite.config.js
 │   └── Dockerfile
 │
-├── 📁 config/                      # Configuraciones
-│   ├── app.env.example             # Variables de entorno (ejemplo)
-│   ├── schema.json                 # Schema de validación
-│   └── topics.yaml                 # Configuración de topics Kafka
+├── 📁 config/                      # Configurations
+│   ├── app.env.example             # Environment variables (example)
+│   ├── schema.json                 # Validation schema
+│   └── topics.yaml                 # Kafka topics configuration
 │
-├── 📁 data/                        # Datos (ignorado por git)
+├── 📁 data/                        # Data (ignored by git)
 │   ├── .gitkeep
-│   └── (archivos CSV de ejemplo)
+│   └── (example CSV files)
 │
-├── 📁 docs/                        # Documentación adicional
-│   └── (documentos de desarrollo)
+├── 📁 docs/                        # Additional documentation
+│   └── (development documents)
 │
-├── 📁 scripts/                     # Scripts de utilidad
-│   └── plot_csv.py                 # Visualización de CSVs
+├── 📁 scripts/                     # Utility scripts
+│   └── plot_csv.py                 # CSV visualization
 │
-├── 📁 utils/                       # Utilidades Python
+├── 📁 utils/                       # Python utilities
 │   ├── analyze_ap3_weights.py
 │   └── example_export_structure.py
 │
-└── 📁 docker/                      # Dockerfiles y configs
+└── 📁 docker/                      # Dockerfiles and configs
     ├── docker-compose.yml
     ├── Dockerfile.agent
     ├── Dockerfile.orchestrator
@@ -416,9 +431,9 @@ TFG_Agente_Data/
 
 ## 🌐 API Endpoints
 
-### Orchestrator (puerto 8081)
+### Orchestrator (port 8081)
 
-#### Datos y Predicciones
+#### Data and Predictions
 
 ```http
 GET  /api/series?id={id}&hours={hours}
@@ -430,7 +445,7 @@ POST /api/reset_system
 POST /api/upload_csv
 ```
 
-#### Métricas y Análisis
+#### Metrics and Analysis
 
 ```http
 GET /api/metrics/combined?id={id}&start={start}
@@ -439,7 +454,7 @@ GET /api/metrics/models/ranked?id={id}&start={start}
 GET /api/selector?id={id}&hours={hours}
 ```
 
-#### Agente y Pesos (AP3)
+#### Agent and Weights (AP3)
 
 ```http
 GET  /api/agent/weights/{unit_id}
@@ -449,7 +464,7 @@ POST /api/agent/export_csv/{unit_id}
 GET  /api/download_weights/{unit_id}
 ```
 
-#### Escenarios
+#### Scenarios
 
 ```http
 POST   /api/scenarios/save?scenario_name={name}&unit_id={id}
@@ -459,68 +474,68 @@ POST   /api/scenarios/compare
 DELETE /api/scenarios/delete/{scenario_name}
 ```
 
-#### Análisis Avanzado (IA)
+#### Advanced Analysis (AI)
 
 ```http
 POST /api/analyze_report/{id}
 POST /api/analyze_report_advanced/{id}
 ```
 
-### Agent (puerto 8090)
+### Agent (port 8090)
 
 ```http
-POST /predict              # Predicción multi-horizonte
-GET  /weights/{unit_id}    # Obtener pesos actuales
-GET  /history/{unit_id}    # Historial de pesos
-GET  /stats/{unit_id}      # Estadísticas por modelo
-POST /export_csv/{unit_id} # Exportar historial completo
-POST /reset/{unit_id}      # Resetear memoria
+POST /predict              # Multi-horizon prediction
+GET  /weights/{unit_id}    # Get current weights
+GET  /history/{unit_id}    # Weight history
+GET  /stats/{unit_id}      # Statistics per model
+POST /export_csv/{unit_id} # Export complete history
+POST /reset/{unit_id}      # Reset memory
 ```
 
-### Documentación Interactiva
+### Interactive Documentation
 
 - Orchestrator: [http://localhost:8081/docs](http://localhost:8081/docs)
 - Agent: [http://localhost:8090/docs](http://localhost:8090/docs)
 
 ---
 
-## 📊 Visualizaciones
+## 📊 Visualizations
 
 ### AP1 - Global Chart
 ![AP1 Global Chart](docs/images/ap1_global_chart.png)
-- Gráfico completo de observaciones vs predicciones
-- Zoom X/Y independiente
-- Visualización por horizonte (T+1, T+20, etc.)
-- Intervalos de confianza
+- Complete chart of observations vs predictions
+- Independent X/Y zoom
+- Visualization by horizon (T+1, T+20, etc.)
+- Confidence intervals
 
-### AP2 - Selector Adaptativo
+### AP2 - Adaptive Selector
 ![AP2 Selector](docs/images/ap2_selector.png)
-- Tabla con decisiones paso a paso
-- Modelo elegido en cada instante
-- Error relativo puntual
-- Valores real vs predicho
+- Table with step-by-step decisions
+- Model chosen at each instant
+- Point-wise relative error
+- Real vs predicted values
 
-### AP3 - Evolución de Pesos
+### AP3 - Weight Evolution
 ![AP3 Weights](docs/images/ap3_weights.png)
-- Gráfico temporal de pesos por modelo
-- Tabla de estadísticas acumuladas
-- Comparación chosen_by_error vs chosen_by_weight
-- Exportación de historial
+- Temporal chart of weights per model
+- Cumulative statistics table
+- Comparison chosen_by_error vs chosen_by_weight
+- History export
 
-### AP4 - Ranking de Modelos
+### AP4 - Model Ranking
 ![AP4 Ranking](docs/images/ap4_ranking.png)
-- Top-3 modelos con badges (🏆🥈🥉)
-- Métricas MAE, RMSE, MAPE
-- Weight final acumulado
-- Error relativo medio
+- Top-3 models with badges (🏆🥈🥉)
+- MAE, RMSE, MAPE metrics
+- Final cumulative weight
+- Mean relative error
 
 ---
 
-## ⚙️ Configuración Avanzada
+## ⚙️ Advanced Configuration
 
-### Variables de Entorno
+### Environment Variables
 
-Archivo: `config/app.env`
+File: `config/app.env`
 
 ```bash
 # Kafka
@@ -534,7 +549,7 @@ INFLUX_TOKEN=admin_token
 INFLUX_ORG=tfg
 INFLUX_BUCKET=pipeline
 
-# Procesamiento
+# Processing
 DATA_PATH=/app/data/demo_final.csv
 PROCESS_MODE=scale_v1
 DEDUP_KEY=ts,unit_id
@@ -545,19 +560,19 @@ MEMORY_SIZE=100
 MIN_WEIGHT=-10.0
 MAX_WEIGHT=10.0
 
-# Groq API (opcional, para análisis IA)
+# Groq API (optional, for AI analysis)
 GROQ_API_KEY=your_api_key_here
 ```
 
-### Configuración de Docker Compose
+### Docker Compose Configuration
 
-Archivo: `docker/docker-compose.yml`
+File: `docker/docker-compose.yml`
 
-Puedes ajustar:
-- Recursos (CPU, memoria)
-- Puertos expuestos
-- Volúmenes persistentes
-- Variables de entorno
+You can adjust:
+- Resources (CPU, memory)
+- Exposed ports
+- Persistent volumes
+- Environment variables
 
 ```yaml
 services:
@@ -572,25 +587,25 @@ services:
           memory: 2G
 ```
 
-### Personalizar Modelos
+### Customize Models
 
-Edita `services/agent/models.py` para:
-- Añadir nuevos modelos de forecasting
-- Modificar hiperparámetros existentes
-- Cambiar estrategia de ensemble
+Edit `services/agent/models.py` to:
+- Add new forecasting models
+- Modify existing hyperparameters
+- Change ensemble strategy
 
-### Ajustar Sistema de Memoria
+### Adjust Memory System
 
-Edita `services/agent/memory_system.py`:
-- `DECAY_FACTOR`: Factor de decay exponencial (0-1)
-- `MEMORY_SIZE`: Tamaño de ventana de memoria
-- `MIN_WEIGHT` / `MAX_WEIGHT`: Límites de pesos
+Edit `services/agent/memory_system.py`:
+- `DECAY_FACTOR`: Exponential decay factor (0-1)
+- `MEMORY_SIZE`: Memory window size
+- `MIN_WEIGHT` / `MAX_WEIGHT`: Weight limits
 
 ---
 
 ## 🧪 Testing
 
-### Tests Unitarios
+### Unit Tests
 
 ```bash
 # Backend (Python)
@@ -605,24 +620,24 @@ cd frontend
 npm run test
 ```
 
-### Tests de Integración
+### Integration Tests
 
 ```bash
-# Levantar sistema completo
+# Start complete system
 docker-compose -f docker/docker-compose.yml up -d
 
-# Ejecutar suite de tests
+# Run test suite
 python tests/integration/test_full_pipeline.py
 ```
 
-### Verificación Manual
+### Manual Verification
 
 ```bash
 # Check health endpoints
 curl http://localhost:8081/health
 curl http://localhost:8090/health
 
-# Test predicción simple
+# Test simple prediction
 curl -X POST http://localhost:8090/predict \
   -H "Content-Type: application/json" \
   -d '{"timestamp": "2025-01-01T00:00:00", "value": 0.123, "unit_id": "test"}'
@@ -630,28 +645,28 @@ curl -X POST http://localhost:8090/predict \
 
 ---
 
-## 🤝 Contribución
+## 🤝 Contributing
 
-Este proyecto es un TFG académico, pero las contribuciones son bienvenidas para mejoras futuras:
+This project is an academic Bachelor's Thesis, but contributions are welcome for future improvements:
 
-1. **Fork** el repositorio
-2. Crea una **branch** para tu feature (`git checkout -b feature/AmazingFeature`)
-3. **Commit** tus cambios (`git commit -m 'Add some AmazingFeature'`)
-4. **Push** a la branch (`git push origin feature/AmazingFeature`)
-5. Abre un **Pull Request**
+1. **Fork** the repository
+2. Create a **branch** for your feature (`git checkout -b feature/AmazingFeature`)
+3. **Commit** your changes (`git commit -m 'Add some AmazingFeature'`)
+4. **Push** to the branch (`git push origin feature/AmazingFeature`)
+5. Open a **Pull Request**
 
 ### Guidelines
 
-- Código Python: seguir [PEP 8](https://pep8.org/)
-- Código JavaScript: seguir [Airbnb Style Guide](https://github.com/airbnb/javascript)
-- Commits: mensajes descriptivos en inglés
-- Tests: incluir tests para nuevas features
+- Python code: follow [PEP 8](https://pep8.org/)
+- JavaScript code: follow [Airbnb Style Guide](https://github.com/airbnb/javascript)
+- Commits: descriptive messages in English
+- Tests: include tests for new features
 
 ---
 
-## 📄 Licencia
+## 📄 License
 
-Este proyecto está bajo la licencia **MIT License**.
+This project is licensed under the **MIT License**.
 
 ```
 MIT License
@@ -689,132 +704,132 @@ SOFTWARE.
 
 ---
 
-## 🙏 Agradecimientos
+## 🙏 Acknowledgments
 
-- **Director del TFG**: [Nombre del director]
-- **Universidad**: Universitat Politècnica de Catalunya (UPC)
-- **Facultad**: Facultat d'Informàtica de Barcelona (FIB)
-- **Curso**: 2025-2026
+- **Thesis Director**: [Thesis Director Name]
+- **University**: Universitat Politècnica de Catalunya (UPC)
+- **Faculty**: Facultat d'Informàtica de Barcelona (FIB)
+- **Academic Year**: 2025-2026
 
-### Tecnologías Open Source Utilizadas
+### Open Source Technologies Used
 
-- [FastAPI](https://fastapi.tiangolo.com/) - Framework web moderno para Python
-- [React](https://reactjs.org/) - Librería UI para interfaces interactivas
-- [Recharts](https://recharts.org/) - Librería de gráficos para React
-- [Apache Kafka](https://kafka.apache.org/) - Plataforma de streaming distribuido
-- [InfluxDB](https://www.influxdata.com/) - Base de datos de series temporales
-- [Docker](https://www.docker.com/) - Plataforma de contenedores
+- [FastAPI](https://fastapi.tiangolo.com/) - Modern web framework for Python
+- [React](https://reactjs.org/) - UI library for interactive interfaces
+- [Recharts](https://recharts.org/) - Charting library for React
+- [Apache Kafka](https://kafka.apache.org/) - Distributed streaming platform
+- [InfluxDB](https://www.influxdata.com/) - Time series database
+- [Docker](https://www.docker.com/) - Container platform
 
 ---
 
-## 📚 Referencias y Recursos
+## 📚 References and Resources
 
-### Papers y Artículos
+### Papers and Articles
 
 1. **Time Series Forecasting**: [Forecasting: Principles and Practice](https://otexts.com/fpp3/)
 2. **Ensemble Learning**: "Ensemble methods in machine learning" - Dietterich (2000)
 3. **Adaptive Systems**: "Adaptive Learning Systems" - IEEE Transactions
 
-### Documentación Técnica
+### Technical Documentation
 
 - [Kafka Documentation](https://kafka.apache.org/documentation/)
 - [InfluxDB Docs](https://docs.influxdata.com/)
 - [FastAPI Guide](https://fastapi.tiangolo.com/tutorial/)
 - [React Docs](https://react.dev/)
 
-### Datasets y Benchmarks
+### Datasets and Benchmarks
 
 - [M4 Competition](https://www.m4.unic.ac.cy/)
 - [Time Series Data Library](https://datamarket.com/data/list/?q=provider:tsdl)
 
 ---
 
-## 🔮 Roadmap Futuro
+## 🔮 Future Roadmap
 
-### Próximas Features
+### Upcoming Features
 
-- [ ] Soporte para más modelos (LSTM, Prophet, ARIMA)
-- [ ] Predicción probabilística con intervalos de confianza bayesianos
-- [ ] Dashboard con métricas en tiempo real (WebSockets)
-- [ ] API GraphQL para queries más flexibles
-- [ ] Soporte multi-tenancy
-- [ ] Clustering automático de series similares
-- [ ] Auto-tuning de hiperparámetros con Optuna
-- [ ] Exportación a formatos Parquet, Avro
-- [ ] Integración con MLflow para tracking de experimentos
+- [ ] Support for more models (LSTM, Prophet, ARIMA)
+- [ ] Probabilistic prediction with Bayesian confidence intervals
+- [ ] Dashboard with real-time metrics (WebSockets)
+- [ ] GraphQL API for more flexible queries
+- [ ] Multi-tenancy support
+- [ ] Automatic clustering of similar series
+- [ ] Hyperparameter auto-tuning with Optuna
+- [ ] Export to Parquet, Avro formats
+- [ ] MLflow integration for experiment tracking
 
-### Mejoras Técnicas
+### Technical Improvements
 
-- [ ] Tests end-to-end con Playwright
-- [ ] CI/CD con GitHub Actions
-- [ ] Deployment en Kubernetes
-- [ ] Monitoring con Prometheus + Grafana
-- [ ] Documentación automática con Sphinx
+- [ ] End-to-end tests with Playwright
+- [ ] CI/CD with GitHub Actions
+- [ ] Kubernetes deployment
+- [ ] Monitoring with Prometheus + Grafana
+- [ ] Automatic documentation with Sphinx
 
 ---
 
 ## ❓ FAQ
 
-### ¿Cómo cambio el horizonte de predicción?
+### How do I change the prediction horizon?
 
-Desde la UI, ajusta el selector "Forecast Horizon" o vía API:
+From the UI, adjust the "Forecast Horizon" selector or via API:
 
 ```bash
 curl -X POST "http://localhost:8081/api/run_window?forecast_horizon=50"
 ```
 
-### ¿Puedo usar mis propios datos?
+### Can I use my own data?
 
-Sí, solo necesitas un CSV con columnas: `timestamp`, `value`, `unit_id`
+Yes, you just need a CSV with columns: `timestamp`, `value`, `unit_id`
 
-### ¿Cómo reseteo el sistema?
+### How do I reset the system?
 
 ```bash
 curl -X POST http://localhost:8081/api/reset_system
 ```
 
-O desde la UI: botón "Reset System"
+Or from the UI: "Reset System" button
 
-### ¿Qué hacer si los servicios no levantan?
+### What if the services don't start?
 
 ```bash
-# Ver logs para diagnosticar
+# View logs to diagnose
 docker-compose -f docker/docker-compose.yml logs
 
-# Reconstruir desde cero
+# Rebuild from scratch
 docker-compose -f docker/docker-compose.yml down -v
 docker-compose -f docker/docker-compose.yml up --build
 ```
 
-### ¿Cómo exporto resultados?
+### How do I export results?
 
-Usa los endpoints de exportación:
+Use the export endpoints:
 
 ```bash
 # Weights history
 curl http://localhost:8081/api/download_weights/unit_01 -o weights.csv
 
-# Métricas
+# Metrics
 curl "http://localhost:8081/api/metrics/models/ranked?id=unit_01" | jq . > metrics.json
 ```
 
 ---
 
-## 📞 Soporte
+## 📞 Support
 
-Si encuentras algún problema o tienes preguntas:
+If you encounter any issues or have questions:
 
-1. Revisa la [sección FAQ](#-faq)
-2. Busca en [Issues](https://github.com/MarcGuitart/TFG_Data_Marc_Guitart/issues)
-3. Abre un nuevo Issue con detalles (logs, screenshots, etc.)
-4. Contacta al autor via email
+1. Review the [FAQ section](#-faq)
+2. Search in [Issues](https://github.com/MarcGuitart/TFG_Data_Marc_Guitart/issues)
+3. Open a new Issue with details (logs, screenshots, etc.)
+4. Contact the author via email
 
 ---
 
 <div align="center">
 
-**⭐ Si este proyecto te ha sido útil, considera darle una estrella en GitHub ⭐**
+**⭐ If this project has been useful to you, consider giving it a star on GitHub ⭐**
 
-[🔝 Volver arriba](#-sistema-adaptativo-de-predicción-multi-horizonte-con-agente-inteligente)
+[🔝 Back to top](#-adaptive-multi-horizon-forecasting-system-with-intelligent-agent)
 
 </div>
