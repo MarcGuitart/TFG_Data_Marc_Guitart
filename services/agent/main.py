@@ -15,18 +15,34 @@ def now_utc():
 
 def shift_ts_to_today(ts_str: str | None) -> datetime:
     """
-    Parsea 'YYYY-mm-dd HH:MM:SS' o ISO.
-    Mantiene H/M/S del CSV pero pone la FECHA de HOY (UTC).
+    Mantiene la fecha y hora del CSV pero las traslada al pasado reciente.
+    Calcula cuántos días atrás estaba el timestamp original y lo traslada
+    manteniendo esa distancia relativa, pero dentro de la ventana de retention.
     """
     base = now_utc()
     if not ts_str:
         return base
+    
     s = str(ts_str).replace("T", " ").replace("Z", "")
     try:
-        t = datetime.strptime(s[:19], "%Y-%m-%d %H:%M:%S").time()
+        original_dt = datetime.strptime(s[:19], "%Y-%m-%d %H:%M:%S")
     except Exception:
         return base
-    return datetime.combine(base.date(), t).replace(tzinfo=timezone.utc)
+    
+    # Referencia: usamos una fecha base del CSV (primera fecha que aparezca)
+    reference_date = datetime(2025, 3, 10)  # Primera fecha del CSV típico
+    
+    # Calculamos cuántos segundos han pasado desde la referencia
+    delta_seconds = (original_dt - reference_date).total_seconds()
+    
+    # Creamos un timestamp 7 días atrás desde ahora y sumamos el delta
+    # Esto asegura que incluso el último punto del CSV esté en el pasado
+    base_past = base - timedelta(days=7)  # 7 días atrás (dentro de retention)
+    
+    # Sumamos el delta desde la referencia
+    result_dt = base_past + timedelta(seconds=delta_seconds)
+    
+    return result_dt
 
 def parse_ts_keep_date(ts_str):
     """Parsea 'YYYY-mm-dd HH:MM:SS' o ISO y conserva fecha y hora; salida UTC."""
@@ -125,9 +141,12 @@ def get_model_stats(unit_id: str):
         "choices_diff": hm.get_choices_diff_count()
     }
 
+
+# Agent-side export handler showing filename and storage location
+
 @app.post("/api/export_csv/{unit_id}")
 def export_csv(unit_id: str):
-    """AP3: Exporta historial a CSV para análisis en Excel"""
+    """Export history to CSV for analysis in Excel"""
     hm = hyper_by_id.get(unit_id)
     if not hm:
         return {"error": f"No HyperModel for {unit_id}"}
@@ -139,13 +158,14 @@ def export_csv(unit_id: str):
 @app.post("/api/reset/{unit_id}")
 def reset_hypermodel(unit_id: str):
     """
-    Resetea el HyperModel de una unidad específica:
-    - Reinicia pesos a 0
-    - Limpia historial de predicciones
-    - Resetea contadores
-    - Resetea buffers de modelos base (para reproducibilidad)
-    
-    Útil para empezar experimentos desde cero sin acumulación de memoria previa.
+    Resets the HyperModel for a specific unit:
+    - Resets weights to 0
+    - Clears prediction history
+    - Resets counters
+    - Resets base model buffers (for reproducibility)
+    - Clears observation buffer
+
+    Useful for starting experiments from scratch without prior memory accumulation.
     """
     hm = hyper_by_id.get(unit_id)
     if not hm:
@@ -154,21 +174,30 @@ def reset_hypermodel(unit_id: str):
     # Reset completo (incluye modelos base)
     hm.reset_complete()
     
-    log.info(f"[reset] HyperModel reseteado completamente para {unit_id}")
+    # Limpiar buffer de observaciones
+    if unit_id in buffers_by_id:
+        buffers_by_id[unit_id].clear()
+    
+    # Limpiar última predicción
+    if unit_id in last_pred_by_id:
+        del last_pred_by_id[unit_id]
+    
+    log.info(f"[reset] HyperModel, buffer y predicciones reseteados completamente para {unit_id}")
     
     return {
         "status": "reset",
         "unit_id": unit_id,
         "weights": dict(hm.w),
         "history_length": len(hm._history),
-        "message": f"HyperModel {unit_id} reiniciado a estado inicial (incluye buffers de modelos base)"
+        "buffer_length": len(buffers_by_id.get(unit_id, [])),
+        "message": f"HyperModel {unit_id} reiniciado a estado inicial (pesos, historial, buffers de observaciones)"
     }
 
 @app.post("/api/reset_all")
 def reset_all_hypermodels():
     """
-    Resetea TODOS los HyperModels activos.
-    Útil para limpiar completamente el sistema antes de un nuevo experimento.
+    Reset ALL the active HyperModels and their observation buffers.
+    Useful for completely clearing the system before a new experiment.
     """
     reset_count = 0
     unit_ids = []
@@ -177,15 +206,23 @@ def reset_all_hypermodels():
         # Reset completo (incluye modelos base)
         hm.reset_complete()
         
+        # Limpiar buffer de observaciones
+        if unit_id in buffers_by_id:
+            buffers_by_id[unit_id].clear()
+        
+        # Limpiar última predicción
+        if unit_id in last_pred_by_id:
+            del last_pred_by_id[unit_id]
+        
         reset_count += 1
         unit_ids.append(unit_id)
-        log.info(f"[reset_all] HyperModel reseteado completamente para {unit_id}")
-    
+        log.info(f"[reset_all] HyperModel, buffer and predictions reset for {unit_id}")
+
     return {
         "status": "reset_all",
         "reset_count": reset_count,
         "unit_ids": unit_ids,
-        "message": f"{reset_count} HyperModels reiniciados completamente"
+        "message": f"{reset_count} HyperModels completely reset (weights, history, observation buffers)"
     }
 
 # === CLIENTES Influx ===
@@ -254,24 +291,24 @@ def auto_purge():
         try:
             enforce_cap_per_unit()
         except Exception as e:
-            log.error("error en auto-purge: %s", e)
+            log.error("Error en auto-purge: %s", e)
         time.sleep(300)
 
-# AP3: Exportación automática de historiales a CSV
+# Automatic exportation of histories to CSV
 CSV_EXPORT_PERIOD = int(os.getenv("CSV_EXPORT_PERIOD_SEC", "300"))  # cada 5 min
 
 def auto_export_csv():
-    """AP3: Exporta periódicamente los historiales a CSV para análisis offline"""
+    """Automatically exports histories to CSV for offline analysis"""
     while True:
         time.sleep(CSV_EXPORT_PERIOD)
         try:
             for unit_id, hm in list(hyper_by_id.items()):
-                if hm._history:  # Solo si hay datos
+                if hm._history:  # Only if there is data
                     filepath = f"/app/data/weights_history_{unit_id}.csv"
                     result = hm.export_history_csv(filepath)
-                    log.info("[AP3] CSV exportado: %s (%d steps)", result, len(hm._history))
+                    log.info("CSV exported: %s (%d steps)", result, len(hm._history))
         except Exception as e:
-            log.error("[AP3] Error exportando CSV: %s", e)
+            log.error("Error exporting CSV: %s", e)
 
 # === ESCRITURA TELEMETRÍA ===
 def write_timeseries(rec):
@@ -297,11 +334,19 @@ def write_timeseries(rec):
             model.update_buffer(float(rec["var"]))  # legacy buffer (no interfiere)
         except Exception:
             pass
-    write_api.write(bucket=INFLUX_BUCKET, record=p)
+    try:
+        write_api.write(bucket=INFLUX_BUCKET, record=p)
+        log.info("✅ Escrito telemetry.var: unit=%s ts=%s", unit, ts)
+    except Exception as e:
+        log.error("❌ Error escribiendo telemetry.var: %s", e)
 
 def write_prediction(unit: str, when: datetime, yhat: float):
     p = Point("telemetry").tag("id", unit).field("prediction", float(yhat)).time(when, WritePrecision.S)
-    write_api.write(bucket=INFLUX_BUCKET, record=p)
+    try:
+        write_api.write(bucket=INFLUX_BUCKET, record=p)
+        log.info("✅ Escrito telemetry.prediction: unit=%s ts=%s", unit, when)
+    except Exception as e:
+        log.error("❌ Error escribiendo telemetry.prediction: %s", e)
 
 # === TRAINER (legacy, compatible con tag id) ===
 def query_training_rows(unit: str, lookback_days: int = LEARN_LOOKBACK_DAYS):
@@ -342,15 +387,18 @@ def learner_loop():
             log.error("learner error: %s", e)
         time.sleep(LEARN_PERIOD_SEC)
 
-# === HYPERMODEL STATE (por id) ===
+
+
+# Dict-of-Dict y Dict-of-Queues 7.5.3-A
+
 buffers_by_id: dict[str, collections.deque] = collections.defaultdict(lambda: collections.deque(maxlen=BUFFER_LEN))
 hyper_by_id: dict[str, HyperModel] = {}
 last_pred_by_id: dict[str, float] = {}
 
+
 def get_hyper_for(unit_id: str) -> HyperModel:
     hm = hyper_by_id.get(unit_id)
     if hm is None:
-        # instanciamos un HyperModel por id para que los pesos sean independientes por flujo
         hm = HyperModel(cfg_path=HYPER_CFG_PATH, decay=HYPER_DECAY, w_cap=HYPER_W_CAP, mode=HYPER_MODE)
         hyper_by_id[unit_id] = hm
         log.info("[hypermodel] creado para id=%s (cfg=%s, decay=%.3f, w_cap=%.1f, mode=%s)",
@@ -379,6 +427,7 @@ def main():
 
     log.info("escuchando %s y publicando en %s", TIN, TOUT)
 
+
     for msg in consumer:
         try:
             rec = msg.value
@@ -387,32 +436,32 @@ def main():
             log.error("error deserializando: %s %s", e, msg.value)
             continue
 
-        # 1) Persistimos observación en Influx
         try:
             write_timeseries(rec)
         except Exception as e:
             log.error("influx write error: %s", e)
 
-        # 2) Predicción con HyperModel (on-line, por id)
+
+        
+
         try:
             unit = rec.get("unit_id") or rec.get("id") or "unknown"
             y_real = rec.get("var")
+
+            # 7.5.3-A second photo
+
             base_ts = select_ts(rec.get("timestamp"))
-            ts_pred = base_ts + timedelta(minutes=PRED_HORIZON_MIN)
 
-
-            # --- actualizar pesos con la VERDAD del tick anterior (si existía pred previa)
             best_model = None
             ts_str = rec.get("timestamp") or base_ts.isoformat()
             if unit in last_pred_by_id and y_real is not None:
                 hm = get_hyper_for(unit)
                 try:
-                    # AP3: Pasamos timestamp para el historial
+                    # Passing timestamp
                     best_model = hm.update_weights(float(y_real), ts=ts_str)
                 except Exception as e:
                     log.warning("[hypermodel] update_weights error: %s", e)
 
-            # --- alimentar buffer y predecir siguiente paso
             buf = buffers_by_id[unit]
             if y_real is not None:
                 try:
@@ -420,50 +469,70 @@ def main():
                 except Exception:
                     pass
 
+            # The evaluation block: y_true vs stored y_hat, score update, overwrite
+            # Get horizon from message (sent by loader) or fall back to env variable
+            
+            msg_horizon = rec.get("forecast_horizon")
+            if msg_horizon is not None:
+                horizon_slots = max(1, int(msg_horizon))
+                horizon_minutes = horizon_slots * SLOT_MINUTES
+            else:
+                # Fall back to environment variable
+                horizon_slots = max(1, PRED_HORIZON_MIN // SLOT_MINUTES)
+                horizon_minutes = PRED_HORIZON_MIN
+
+            log.info(f"[horizon] Using horizon_slots={horizon_slots} (T+{horizon_slots}, {horizon_minutes} min)")
+
             hm = get_hyper_for(unit)
-            y_hat, preds_by_model = hm.predict(list(buf))
+            # Pass horizon to HyperModel so each model predicts T+M instead of T+1
+            y_hat, preds_by_model = hm.predict(list(buf), horizon=horizon_slots)
             weights = hm.export_state()
-            chosen_model = hm.get_chosen_model()  # Modelo elegido (modo adaptive)
-            last_errors = hm.get_last_errors()     # Errores absolutos del último step
-            last_errors_rel = hm.get_last_errors_rel()  # AP2: Errores relativos
-            chosen_error = hm.get_chosen_error()   # AP2: Error del modelo elegido
+            chosen_model = hm.get_chosen_model()  # Chosen model
+            last_errors = hm.get_last_errors()     # Last step absolute errors
+            last_errors_rel = hm.get_last_errors_rel()  # Relative errors
+            chosen_error = hm.get_chosen_error()   # Chosen model error
             last_pred_by_id[unit] = y_hat
 
-            log.info("[pred-ts] base=%s ts_pred=%s delta_min=%.1f",
-                base_ts.isoformat(), ts_pred.isoformat(),
+            # Calculate ts_pred based on the horizon
+
+            ts_pred = base_ts + timedelta(minutes=horizon_minutes)  # t + m
+            
+            log.info("[pred-ts] base=%s ts_pred=%s horizon=T+%d delta_min=%.1f",
+                base_ts.isoformat(), ts_pred.isoformat(), horizon_slots,
                 (ts_pred - base_ts).total_seconds()/60.0)
-            # 3) Compatibilidad: conservamos tu horizonte y escritura de 'prediction'
-            ts_pred = base_ts + timedelta(minutes=PRED_HORIZON_MIN)
+
             write_prediction(unit, ts_pred, y_hat)
 
-            # 4) Publicamos mensaje enriquecido (compatible + telemetría HyperModel)
             enriched = dict(rec)
-            enriched["yhat"] = float(y_hat)                  # COMPAT: collector la escribe en 'prediction'
-            enriched["ts_pred"] = ts_pred.strftime("%Y-%m-%d %H:%M:%S")
+            enriched["yhat"] = float(y_hat)                  # Collector writes in 'prediction'
+            enriched["ts_pred"] = ts_pred.strftime("%Y-%m-%d %H:%M:%S")  # target timestamp (t + m)
+            enriched["ts_decision"] = base_ts.strftime("%Y-%m-%d %H:%M:%S")  # t (decision time)
+            enriched["ts_influx"] = base_ts.strftime("%Y-%m-%d %H:%M:%S")  # Timestamp used for InfluxDB
+            enriched["horizon"] = horizon_slots  # m (number of slots ahead)
             enriched["mode"] = FLAVOR
             if "timestamp" in enriched and "ts" not in enriched:
                 enriched["ts"] = enriched["timestamp"]
 
-            # Telemetría opcional (por si luego la colectas en otra measurement)
+            # Optional telemetry (in case you collect it in another measurement later)
             enriched["hyper_y_hat"] = float(y_hat)
             enriched["hyper_models"] = preds_by_model
             enriched["hyper_weights"] = weights
-            enriched["hyper_chosen"] = chosen_model       # Modelo elegido (AP2)
-            enriched["hyper_errors"] = last_errors        # Errores absolutos por modelo
-            enriched["hyper_errors_rel"] = last_errors_rel  # AP2: Errores relativos por modelo
-            
-            # AP2: Error específico del modelo elegido
+            enriched["hyper_chosen"] = chosen_model       # Chosen model
+            enriched["hyper_errors"] = last_errors        # Absolute errors by model
+            enriched["hyper_errors_rel"] = last_errors_rel  # Relative errors by model
+
+            # Specific error of the chosen model
             enriched["chosen_error_abs"] = chosen_error.get("abs", 0.0)
             enriched["chosen_error_rel"] = chosen_error.get("rel", 0.0)
-            
-            # AP3: Información adicional del sistema de pesos con memoria
+
+            # Additional information from the memory-weighted system
             last_entry = hm.get_last_history_entry()
             if last_entry:
                 enriched["chosen_by_error"] = last_entry.get("chosen_by_error", "")
                 enriched["chosen_by_weight"] = last_entry.get("chosen_by_weight", "")
                 enriched["choices_differ"] = last_entry.get("choices_differ", False)
                 enriched["decay_share"] = last_entry.get("decay_share", 0.0)
-                # Rankings de este step
+                # Rankings of this step
                 enriched["rankings"] = {name: last_entry.get(f"rank_{name}", 0) for name in hm.model_names}
                 enriched["rewards"] = {name: last_entry.get(f"reward_{name}", 0) for name in hm.model_names}
 

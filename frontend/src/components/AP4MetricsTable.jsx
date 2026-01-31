@@ -1,4 +1,5 @@
 import React, { useMemo } from "react";
+import { Medal } from "lucide-react";
 
 /**
  * AP4: Tabla de métricas por modelo con ranking por peso (Top-3).
@@ -30,15 +31,17 @@ export default function AP4MetricsTable({ data = [] }) {
   if (!processedData.length) {
     return (
       <div style={{ width: "100%", marginTop: 20 }}>
-        <h3>AP4: Tabla de Métricas por Modelo</h3>
+        <h3>Tabla de Métricas por Modelo</h3>
         <p style={{ color: "#ccc" }}>(no hay datos)</p>
       </div>
     );
   }
 
   const getBadge = (rank) => {
-    const badges = ["🥇", "🥈", "🥉"];
-    return rank <= 3 ? badges[rank - 1] : rank;
+    if (rank === 1) return <Medal size={18} style={{ color: "#FFD700" }} />;
+    if (rank === 2) return <Medal size={18} style={{ color: "#C0C0C0" }} />;
+    if (rank === 3) return <Medal size={18} style={{ color: "#CD7F32" }} />;
+    return rank;
   };
 
   const getRowColor = (rank) => {
@@ -50,12 +53,12 @@ export default function AP4MetricsTable({ data = [] }) {
 
   return (
     <div style={{ width: "100%", marginTop: 20, marginBottom: 20 }}>
-      <h3>AP4: Ranking de Modelos (Top-3)</h3>
-      <p style={{ fontSize: 12, color: "#666", marginBottom: 10 }}>
-        Ordenado por peso final acumulado (weight_final). Métricas globales: MAE, RMSE, MAPE, Error relativo medio (%).
+      <h3>Models Ranking (Top-3)</h3>
+      <p style={{ fontSize: 12, color: "#ffffffff", marginBottom: 10 }}>
+        Sorted by accumulated final weight (weight_final). Global metrics: MAE, RMSE, MAPE, Mean relative error (%).
       </p>
 
-      {/* Tabla */}
+      {/* Table */}
       <div style={{ overflowX: "auto" }}>
         <table
           style={{
@@ -260,9 +263,18 @@ export default function AP4MetricsTable({ data = [] }) {
       <div style={{ marginTop: 15, padding: "12px", backgroundColor: "#252525", borderLeft: "4px solid #FFD700", fontSize: 12 }}>
         <strong>Top-3 Explanation:</strong>
         <ul style={{ margin: "10px 0", paddingLeft: 20 }}>
-          <li><strong>🥇 Rank 1:</strong> Highest accumulated weight (best long-term performance)</li>
-          <li><strong>🥈 Rank 2:</strong> Second-best weight accumulation</li>
-          <li><strong>🥉 Rank 3:</strong> Third-best weight accumulation</li>
+          <li style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+            <Medal size={16} style={{ color: "#FFD700" }} />
+            <strong>Rank 1:</strong> Highest accumulated weight (best long-term performance)
+          </li>
+          <li style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+            <Medal size={16} style={{ color: "#C0C0C0" }} />
+            <strong>Rank 2:</strong> Second-best weight accumulation
+          </li>
+          <li style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+            <Medal size={16} style={{ color: "#CD7F32" }} />
+            <strong>Rank 3:</strong> Third-best weight accumulation
+          </li>
           <li><strong>Weight:</strong> Total points earned from the ranking + memory system</li>
           <li><strong>MAE/RMSE/MAPE:</strong> Global error metrics</li>
           <li><strong>Err Rel Mean:</strong> Average relative error (%) across all predictions</li>

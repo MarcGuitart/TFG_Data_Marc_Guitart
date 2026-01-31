@@ -6,6 +6,8 @@ from .linear_model import LinearModel
 from .poly_model import PolyModel
 from .alphabeta import AlphaBetaModel
 from .kalman_model import KalmanModel
+from .naive_model import NaiveModel
+from .moving_average_model import MovingAverageModel
 
 
 MODEL_REGISTRY = {
@@ -13,6 +15,9 @@ MODEL_REGISTRY = {
     "poly": PolyModel,
     "alphabeta": AlphaBetaModel,
     "kalman": KalmanModel,
+    "naive": NaiveModel,
+    "hyper": MovingAverageModel,
+    "moving_average": MovingAverageModel,
 }
 
 class HyperModel:
@@ -40,13 +45,15 @@ class HyperModel:
        - Recompensa: +1 al ganador, -1/(N-1) a los perdedores
        - Selección: El modelo con menor error en el step anterior predice
        
-    4. "weighted_ensemble" (NUEVO):
-       - Sistema de ensemble ponderado adaptativamente
-       - Decadencia y recompensa como en AP3
-       - DIFERENCIA CLAVE: NO selecciona un único modelo
-       - La predicción es la MEDIA PONDERADA de todos los modelos según sus pesos
-       - Los modelos con mejor rendimiento tienen más influencia, pero todos contribuyen
-       - Evita que un solo modelo domine completamente
+    4. "weighted_ensemble" (SISTEMA PROPORCIONAL):
+       - Sistema de ensemble ponderado con evaluación punto por punto
+       - Ranking: Se ordenan modelos por error en cada punto (menor a mayor)
+       - Recompensas proporcionales: 1°→1.0, 2°→0.5, 3°→0.33, 4°→0.25, ...
+       - Normalización: Se escalan para que la suma total = N (conservación de puntos)
+       - Decadencia: Todos pierden 1 punto (distribución equitativa)
+       - Predicción: Media ponderada de TODOS los modelos según pesos acumulados
+       - Los modelos con mejor historial tienen más influencia, pero todos contribuyen
+       - Evita dominación completa de un solo modelo
     """
     
     def __init__(self, cfg_path: str, decay: float = 0.9, eps: float = 1e-6, 
@@ -80,22 +87,29 @@ class HyperModel:
             inst = cls(name=name, **(m.get("params", {})))
             self.models.append(inst)
             self.model_names.append(name)
-            self.w[name] = float(m.get("init_weight", 0.0))  # AP3: iniciar a 0
+            self.w[name] = float(m.get("init_weight", 0.0))  
         
         # Estado interno
         self._last_preds: Dict[str, float] = {}
         self._last_chosen: str = ""
+        self._last_y_hat: float = 0.0  # Predicción final (ensemble o modelo elegido)
         self._last_errors: Dict[str, float] = {}
         self._last_errors_rel: Dict[str, float] = {}
         self._last_y_true: float = 0.0
+        self._ensemble_error_abs: float = 0.0  # Error absoluto del ensemble
+        self._ensemble_error_rel: float = 0.0  # Error relativo del ensemble
         
         # AP3: Historial para análisis offline
         self._history: List[Dict[str, Any]] = []
         self._step_count: int = 0
 
-    def predict(self, series: Sequence[float]) -> Tuple[float, Dict[str, float]]:
+    def predict(self, series: Sequence[float], horizon: int = 1) -> Tuple[float, Dict[str, float]]:
         """
         Genera predicciones de todos los modelos y devuelve la combinada.
+        
+        Args:
+            series: Secuencia de observaciones históricas
+            horizon: Número de slots adelante para predecir (1=T+1, 5=T+5, etc.)
         
         En modo "weighted": promedio ponderado por pesos adaptativos (LEGACY)
         En modo "weighted_ensemble": promedio ponderado con pesos adaptativos actualizados (NUEVO)
@@ -106,7 +120,8 @@ class HyperModel:
         Returns:
             (y_hat_combined, {model_name: y_hat, ...})
         """
-        preds = {m.name: float(m.predict(series)) for m in self.models}
+        # Pass horizon to each model for T+M prediction
+        preds = {m.name: float(m.predict(series, horizon=horizon)) for m in self.models}
         self._last_preds = preds
         
         if self.mode == "adaptive" or self.mode == "greedy_adaptive":
@@ -140,11 +155,11 @@ class HyperModel:
             if total_w <= self.eps:
                 # Si todos los pesos son ~0, usar promedio simple
                 y_hat = sum(preds.values()) / max(len(preds), 1)
-                self._last_chosen = "ensemble_equal"
+                # _last_chosen se asignará en update_weights con el ganador por error
             else:
                 # Media ponderada por pesos adaptativos
                 y_hat = sum(preds[n] * max(self.w[n], 0.0) for n in preds) / total_w
-                self._last_chosen = "ensemble_weighted"
+                # _last_chosen se asignará en update_weights con el ganador por error
         else:
             # Modo weighted (LEGACY): promedio ponderado
             total_w = sum(max(self.w[n], 0.0) for n in preds)
@@ -152,6 +167,9 @@ class HyperModel:
                 y_hat = sum(preds.values()) / max(len(preds), 1)
             else:
                 y_hat = sum(preds[n] * max(self.w[n], 0.0) for n in preds) / total_w
+        
+        # Guardar la predicción final para calcular su error en update_weights
+        self._last_y_hat = float(y_hat)
         
         return float(y_hat), preds
 
@@ -197,23 +215,21 @@ class HyperModel:
         self._step_count += 1
         N = len(self.model_names)
         
-        # --- 1) Calcular errores de predicción ---
+        # Compute errors of prediction
         errors_abs = {}
         errors_rel = {}
-        EPS_REL = 0.01  # Epsilon para evitar división por valores muy pequeños
-        MAX_ERR_REL = 100.0  # Clamp máximo para error relativo (±100%)
-        
+        EPS_REL = 0.01  # Epsilon to avoid division by very small values
+        MAX_ERR_REL = 100.0  # Clamp maximum for relative error (±100%)
+
         for name, y_pred in self._last_preds.items():
             e_abs = abs(y_true - y_pred)
             errors_abs[name] = e_abs
-            
-            # Error relativo con protección contra división por cero y clamp
+
+            # Relative Error with protection against division by zero and clamp
             if abs(y_true) > EPS_REL:
                 e_rel = ((y_pred - y_true) / y_true) * 100.0
-                # Clamp para evitar valores absurdos (-700%, +2500%, etc.)
                 e_rel = max(-MAX_ERR_REL, min(MAX_ERR_REL, e_rel))
             else:
-                # Si real es ~0, usar error absoluto como proxy o marcar como N/A
                 e_rel = 0.0 if abs(y_pred) < EPS_REL else (100.0 if y_pred > 0 else -100.0)
             errors_rel[name] = e_rel
         
@@ -221,9 +237,17 @@ class HyperModel:
         self._last_errors_rel = errors_rel
         self._last_y_true = y_true
         
-        weights_before = dict(self.w)  # Guardar para historial
+        if self._last_y_hat is not None:
+            self._ensemble_error_abs = abs(y_true - self._last_y_hat) # Prediction vs Real in t+M
+            if abs(y_true) > EPS_REL:
+                self._ensemble_error_rel = ((self._last_y_hat - y_true) / y_true) * 100.0
+                self._ensemble_error_rel = max(-MAX_ERR_REL, min(MAX_ERR_REL, self._ensemble_error_rel))
+            else:
+                self._ensemble_error_rel = 0.0 if abs(self._last_y_hat) < EPS_REL else (100.0 if self._last_y_hat > 0 else -100.0)
         
-        # --- Ordenar por error ascendente (mejor primero) ---
+        weights_before = dict(self.w) 
+
+        # Sort by absolute error
         ranked = sorted(errors_abs.items(), key=lambda kv: kv[1])
         chosen_by_error_simple = ranked[0][0]  # Mejor modelo por error
         
@@ -283,15 +307,25 @@ class HyperModel:
             chosen_by_weight = max(self.model_names, key=lambda n: self.w[n])
             
         elif self.mode == "weighted_ensemble":
-            # ========== MODO WEIGHTED_ENSEMBLE (Ensemble ponderado adaptativamente) ==========
-            # Sistema de ranking adaptativo (AP3) pero sin seleccionar un único modelo
-            # - Decadencia: Todos pierden bolsa/N
-            # - Recompensa: N al mejor, N-1 al segundo, ..., 1 al peor
-            # - Predicción: Media ponderada de TODOS los modelos según sus pesos
+            # ========== MODO WEIGHTED_ENSEMBLE (Ensemble proporcional punto por punto) ==========
+            # Sistema de ranking proporcional: puntos decrecientes normalizados
+            # - Ranking: 1° → 1.0, 2° → 0.5, 3° → 0.33, 4° → 0.25, ...
+            # - Normalización: escalar para que la suma = N (conservación)
+            # - Decadencia: Todos pierden suma_rewards/N (distribución equitativa de la bolsa)
+            # - Predicción: Media ponderada de TODOS los modelos según pesos acumulados
             
-            # --- 2) DECADENCIA: Restar bolsa total repartida equitativamente ---
-            total_reward = sum(range(1, N + 1))
-            decay_share = total_reward / N
+            # --- Calcular recompensas proporcionales ---
+            # Mejor modelo: 1.0, segundo: 1/2, tercero: 1/3, etc.
+            raw_rewards = []
+            for rank in range(N):
+                raw_rewards.append(1.0 / (rank + 1))  # 1, 1/2, 1/3, 1/4, ...
+            
+            # Normalizar para que sumen exactamente N
+            sum_raw = sum(raw_rewards)
+            normalized_rewards = [(r / sum_raw) * N for r in raw_rewards]
+            
+            # --- DECADENCIA: Restar la bolsa repartida equitativamente ---
+            decay_share = N / N  # = 1.0 (cada modelo pierde 1 punto en promedio)
             
             for name in self.model_names:
                 self.w[name] -= decay_share
@@ -299,15 +333,16 @@ class HyperModel:
                 if not self.allow_negative and self.w[name] < 0:
                     self.w[name] = 0.0
             
-            # --- 4) RECOMPENSA: N al mejor, N-1 al segundo, ..., 1 al peor ---
+            # --- RECOMPENSA: Asignar puntos normalizados según ranking ---
             rewards = {}
             for rank, (name, _) in enumerate(ranked):
-                reward = N - rank  # mejor → N puntos, peor → 1 punto
+                reward = normalized_rewards[rank]
                 self.w[name] += reward
                 rewards[name] = reward
             
-            # --- 6) No hay selección de modelo único, todos participan en ensemble ---
-            chosen_by_weight = "ensemble_weighted"
+            # --- El modelo "elegido" es el GANADOR del punto (menor error) ---
+            # Este es el modelo que se mostrará en análisis como "chosen_model"
+            chosen_by_weight = chosen_by_error_simple
             
         else:
             # ========== MODO ADAPTIVE/WEIGHTED (AP3 original o LEGACY) ==========
@@ -331,27 +366,28 @@ class HyperModel:
             
             # --- 6) Modelo elegido por peso acumulado (AP3) ---
             chosen_by_weight = max(self.model_names, key=lambda n: self.w[n])
+
+        # --- 7) Saving history for offline analysis ---
         
-        # --- 7) Guardar historial para análisis offline ---
         history_entry = {
             "step": self._step_count,
             "ts": ts or datetime.utcnow().isoformat(),
             "y_real": y_true,
-            # Predicciones por modelo
+            # Predictions for models    
             **{f"y_{name}": self._last_preds.get(name, 0.0) for name in self.model_names},
-            # Errores absolutos por modelo
+            # Absolute errors for models
             **{f"err_{name}": errors_abs.get(name, 0.0) for name in self.model_names},
-            # Errores relativos por modelo (%)
+            # Relative errors for models (%)
             **{f"err_rel_{name}": errors_rel.get(name, 0.0) for name in self.model_names},
-            # Pesos ANTES del update
+            # Weights BEFORE update
             **{f"w_pre_{name}": weights_before.get(name, 0.0) for name in self.model_names},
-            # Pesos DESPUÉS del update
+            # Weights AFTER update
             **{f"w_{name}": self.w.get(name, 0.0) for name in self.model_names},
-            # Rewards asignados
+            # Rewards assigned
             **{f"reward_{name}": rewards.get(name, 0) for name in self.model_names},
-            # Ranking (1 = mejor)
+            # Ranking (1 = best)
             **{f"rank_{name}": rank + 1 for rank, (name, _) in enumerate(ranked)},
-            # Decisiones
+            # Decisions
             "chosen_by_error": chosen_by_error_simple,
             "chosen_by_weight": chosen_by_weight,
             "choices_differ": chosen_by_error_simple != chosen_by_weight,
@@ -364,6 +400,9 @@ class HyperModel:
         if self.mode == "adaptive" or self.mode == "greedy_adaptive":
             self._last_chosen = chosen_by_weight
         elif self.mode == "greedy_weighted":
+            self._last_chosen = chosen_by_error_simple
+        elif self.mode == "weighted_ensemble":
+            # En ensemble, el "elegido" es el ganador del punto (menor error)
             self._last_chosen = chosen_by_error_simple
         
         return chosen_by_weight
@@ -386,12 +425,25 @@ class HyperModel:
     
     def get_chosen_error(self) -> Dict[str, float]:
         """
-        AP2: Devuelve el error del modelo elegido.
+        AP2: Devuelve el error del modelo elegido o del ensemble.
+        
+        En modo weighted_ensemble: devuelve el error de la predicción combinada (ensemble).
+        En otros modos: devuelve el error del modelo seleccionado.
+        
         Returns: {"abs": float, "rel": float} o vacío si no hay datos
         """
         chosen = self._last_chosen
         if not chosen:
             return {}
+        
+        # Si estamos en modo ensemble, devolver el error del ensemble
+        if chosen in ("ensemble_weighted", "ensemble_equal"):
+            return {
+                "abs": self._ensemble_error_abs,
+                "rel": self._ensemble_error_rel
+            }
+        
+        # En otros modos, devolver el error del modelo elegido
         e_abs = self._last_errors.get(chosen, 0.0)
         e_rel = getattr(self, '_last_errors_rel', {}).get(chosen, 0.0)
         return {"abs": e_abs, "rel": e_rel}
@@ -426,25 +478,62 @@ class HyperModel:
             "differ_pct": (differ / total * 100) if total > 0 else 0.0
         }
     
+
+    # The export_history_csv() fieldnames list (column schema)
+
     def export_history_csv(self, filepath: str) -> str:
-        """
-        AP3: Exporta el historial completo a CSV para análisis en Excel.
-        
-        Args:
-            filepath: Ruta del archivo CSV a crear
-            
-        Returns:
-            filepath si éxito, o mensaje de error
-        """
         if not self._history:
-            return "No hay historial para exportar"
+            return "No history to export"
         
         try:
-            # Asegurar directorio existe
+            # Ensure directory exists
             os.makedirs(os.path.dirname(filepath) if os.path.dirname(filepath) else ".", exist_ok=True)
+
+            # Extract model names
+            first_entry = self._history[0]
+            model_names = [k.replace("y_", "") for k in first_entry.keys() if k.startswith("y_") and k != "y_real"]
+
+            # Build column order: temporal → real → predictions → errors → weights → ranking → decisions
+            fieldnames = [
+                "step", "ts",
+                "y_real",
+            ]
+            # 3. PREDICCIONES por modelo
+            for model in model_names:
+                fieldnames.append(f"y_{model}")
             
-            # Obtener todas las columnas de la primera entrada
-            fieldnames = list(self._history[0].keys())
+            # 4. ERRORES ABSOLUTOS por modelo
+            for model in model_names:
+                fieldnames.append(f"err_{model}")
+            
+            # 5. ERRORES RELATIVOS por modelo (%)
+            for model in model_names:
+                fieldnames.append(f"err_rel_{model}")
+            
+            # 6. WEIGHTS ACTUALES por modelo (pesos DESPUÉS del update)
+            for model in model_names:
+                fieldnames.append(f"w_{model}")
+            
+            # 7. RANKING por modelo (1 = mejor, N = peor)
+            for model in model_names:
+                fieldnames.append(f"rank_{model}")
+            
+            # 8. DECISIÓN: modelo elegido por error mínimo (chosen by error)
+            fieldnames.append("chosen_by_error")
+            
+            # Conditional inclusion of reward_ and w_pre_ fields
+
+            optional_fields = ["total_reward", "choices_differ", "chosen_by_weight", "decay_share"]
+            for field in optional_fields:
+                if field in first_entry and field not in fieldnames:
+                    fieldnames.append(field)
+
+            # Agregate fields pre-weights and rewards if exists
+            for model in model_names:
+                if f"w_pre_{model}" in first_entry and f"w_pre_{model}" not in fieldnames:
+                    fieldnames.append(f"w_pre_{model}")
+                if f"reward_{model}" in first_entry and f"reward_{model}" not in fieldnames:
+                    fieldnames.append(f"reward_{model}")
             
             with open(filepath, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -452,7 +541,8 @@ class HyperModel:
                 for entry in self._history:
                     # Redondear floats para legibilidad
                     row = {}
-                    for k, v in entry.items():
+                    for k in fieldnames:
+                        v = entry.get(k)
                         if isinstance(v, float):
                             row[k] = round(v, 6)
                         else:
@@ -500,6 +590,8 @@ class HyperModel:
         """AP3: Resetea el historial (para nuevas ejecuciones)"""
         self._history = []
         self._step_count = 0
+
+    # Agent reset function showing score/history/buffer/last prediction clearance
     
     def reset_complete(self):
         """
@@ -509,23 +601,26 @@ class HyperModel:
         - Contadores a 0
         - Buffers de modelos base vacíos
         """
-        # Resetear pesos
+        # Reset weights
         for name in self.model_names:
             self.w[name] = 0.0
-        
-        # Limpiar historial y contadores
+
+        # Clear history and counters
         self._history = []
         self._step_count = 0
         self._last_preds = {}
         self._last_chosen = ""
+        self._last_y_hat = 0.0
         self._last_errors = {}
         self._last_errors_rel = {}
         self._last_y_true = 0.0
-        
-        # Resetear buffers de modelos base (self.models es una LISTA)
+        self._ensemble_error_abs = 0.0
+        self._ensemble_error_rel = 0.0
+
+        # Reset base model buffers (self.models is a LIST)
         for model in self.models:
             if hasattr(model, 'reset'):
                 model.reset()
             elif hasattr(model, 'buf'):
-                # Limpiar buffer si existe
+                # Clear buffer if it exists
                 model.buf = []

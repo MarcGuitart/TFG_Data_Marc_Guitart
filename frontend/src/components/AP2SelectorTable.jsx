@@ -1,37 +1,37 @@
 import React, { useMemo, useState } from "react";
 
 /**
- * AP2: Tabla del selector adaptativo con:
+ * AP2: Adaptive Selector Table with:
  * - Timestamp
- * - Modelo elegido
- * - Error relativo puntual (%)
- * - Error absoluto
+ * - Selected model
+ * - Relative error (%)
+ * - Absolute error
  * 
  * Props:
- * - data: array de {t, chosen_model, error_rel, error_abs, y_real, y_pred}
- * - onRowHover: callback cuando el usuario hace hover en una fila
+ * - data: array of {t, chosen_model, error_rel, error_abs, y_real, y_pred}
+ * - onRowHover: callback when user hovers over a row
  */
 
-// Helper: formatear error relativo con clamp visual
+// Helper: format relative error with visual clamp
 const formatErrorRel = (val) => {
   if (val == null || val === undefined) return "—";
   const num = parseFloat(val);
   if (!isFinite(num)) return "⚠️ N/A";
-  // Clamp visual para evitar mostrar valores absurdos
+  // Visual clamp to avoid showing absurd values
   if (Math.abs(num) > 100) {
     return num > 0 ? ">100%" : "<-100%";
   }
   return `${num.toFixed(2)}%`;
 };
 
-// Helper: color del error relativo
+// Helper: color for relative error
 const getErrorRelColor = (val) => {
   if (val == null || !isFinite(val)) return "#999";
   const absVal = Math.abs(val);
-  if (absVal > 50) return "#FF4444";  // Rojo fuerte
-  if (absVal > 20) return "#FF6B6B";  // Rojo
-  if (absVal > 10) return "#FFD93D";  // Amarillo
-  return "#4ECDC4";  // Verde
+  if (absVal > 50) return "#FF4444";  // Strong red
+  if (absVal > 20) return "#FF6B6B";  // Red
+  if (absVal > 10) return "#FFD93D";  // Yellow
+  return "#4ECDC4";  // Green
 };
 
 export default function AP2SelectorTable({ data = [], onRowHover, maxRows = 1000 }) {
@@ -41,12 +41,12 @@ export default function AP2SelectorTable({ data = [], onRowHover, maxRows = 1000
   const processedData = useMemo(() => {
     let rows = Array.isArray(data) ? data.slice(0, maxRows) : [];
     
-    // Filtrar por modelo si está seleccionado
+    // Filter by model if selected
     if (filterModel) {
       rows = rows.filter((r) => r.chosen_model === filterModel);
     }
     
-    // Ordenar
+    // Sort
     rows.sort((a, b) => {
       const aVal = a[sortConfig.key];
       const bVal = b[sortConfig.key];
@@ -92,28 +92,28 @@ export default function AP2SelectorTable({ data = [], onRowHover, maxRows = 1000
   if (!processedData.length) {
     return (
       <div style={{ width: "100%", marginTop: 20 }}>
-        <h3>AP2: Tabla del Selector Adaptativo</h3>
-        <p style={{ color: "#ccc" }}>(no hay datos)</p>
+        <h3>Adaptive Selector Table</h3>
+        <p style={{ color: "#ccc" }}>(no data)</p>
       </div>
     );
   }
 
   return (
     <div style={{ width: "100%", marginTop: 20, marginBottom: 20 }}>
-      <h3>AP2: Tabla del Selector Adaptativo</h3>
-      <p style={{ fontSize: 12, color: "#666", marginBottom: 10 }}>
-        Cada fila muestra el modelo elegido, su error puntual (en % y valor absoluto) para cada timestamp.
+      <h3>Adaptive Selector Table</h3>
+      <p style={{ fontSize: 12, color: "#ffffffff", marginBottom: 10 }}>
+        Each row shows the selected model, its point error (in % and absolute value) for each timestamp.
       </p>
 
-      {/* Filtros */}
+      {/* Filters */}
       <div style={{ marginBottom: 15, display: "flex", gap: 10, alignItems: "center" }}>
-        <label style={{ fontSize: 12 }}>Filtrar por modelo:</label>
+        <label style={{ fontSize: 12 }}>Filter by model:</label>
         <select
           value={filterModel || ""}
           onChange={(e) => setFilterModel(e.target.value || null)}
           style={{ padding: "5px", fontSize: 12 }}
         >
-          <option value="">Todos</option>
+          <option value="">All</option>
           {uniqueModels.map((m) => (
             <option key={m} value={m}>
               {m}
@@ -121,11 +121,11 @@ export default function AP2SelectorTable({ data = [], onRowHover, maxRows = 1000
           ))}
         </select>
         <span style={{ fontSize: 11, color: "#999" }}>
-          Mostrando {processedData.length} de {data.length} filas
+          Showing {processedData.length} of {data.length} rows
         </span>
       </div>
 
-      {/* Tabla */}
+      {/* Table */}
       <div style={{ overflowX: "auto" }}>
         <table
           style={{
@@ -148,7 +148,7 @@ export default function AP2SelectorTable({ data = [], onRowHover, maxRows = 1000
                   borderRight: "1px solid #444",
                 }}
               >
-                Time {sortArrow("t")}
+                Timestamp {sortArrow("t")}
               </th>
               <th
                 onClick={() => handleSort("chosen_model")}

@@ -3,6 +3,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, ReferenceLine
 } from "recharts";
+import { CheckCircle, XCircle, AlertTriangle, TrendingUp, BarChart3, Lightbulb, Medal } from 'lucide-react';
 
 const API_BASE = "http://localhost:8081";
 
@@ -120,12 +121,12 @@ export default function AP3WeightsPanel({ selectedId }) {
       });
       const data = await res.json();
       if (res.ok) {
-        setExportStatus(`✅ CSV exportado: ${data.filepath}`);
+        setExportStatus(`success:CSV exported: ${data.filepath}`);
       } else {
-        setExportStatus(`❌ Error: ${data.error || data.detail}`);
+        setExportStatus(`error:Error: ${data.error || data.detail}`);
       }
     } catch (e) {
-      setExportStatus(`❌ Error: ${e.message}`);
+      setExportStatus(`error:Error: ${e.message}`);
     }
     // Limpiar mensaje después de 5 segundos
     setTimeout(() => setExportStatus(""), 5000);
@@ -157,60 +158,74 @@ export default function AP3WeightsPanel({ selectedId }) {
           <button
             onClick={() => setView("chart")}
             style={{
-              padding: "4px 12px",
+              padding: "6px 14px",
               background: view === "chart" ? "#FF7A00" : "#333",
               border: "1px solid #555",
               borderRadius: 4,
               color: "#fff",
               cursor: "pointer",
               fontSize: 12,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
             }}
           >
-            📈 Gráfico
+            <TrendingUp size={14} />
+            Chart
           </button>
           <button
             onClick={() => setView("table")}
             style={{
-              padding: "4px 12px",
+              padding: "6px 14px",
               background: view === "table" ? "#FF7A00" : "#333",
               border: "1px solid #555",
               borderRadius: 4,
               color: "#fff",
               cursor: "pointer",
               fontSize: 12,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
             }}
           >
-            📋 Historial
+            History
           </button>
           <button
             onClick={() => setView("stats")}
             style={{
-              padding: "4px 12px",
+              padding: "6px 14px",
               background: view === "stats" ? "#FF7A00" : "#333",
               border: "1px solid #555",
               borderRadius: 4,
               color: "#fff",
               cursor: "pointer",
               fontSize: 12,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
             }}
           >
-            📊 Stats
+            <BarChart3 size={14} />
+            Statistics
           </button>
           
           {/* Botón exportar CSV */}
           <button
             onClick={handleExportCSV}
             style={{
-              padding: "4px 12px",
+              padding: "6px 14px",
               background: "#2563EB",
               border: "1px solid #3B82F6",
               borderRadius: 4,
               color: "#fff",
               cursor: "pointer",
               fontSize: 12,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
             }}
           >
-            💾 Export CSV
+            � Export CSV
           </button>
         </div>
       </div>
@@ -219,12 +234,16 @@ export default function AP3WeightsPanel({ selectedId }) {
       {exportStatus && (
         <div style={{ 
           fontSize: 12, 
-          padding: "4px 8px", 
-          background: exportStatus.startsWith("✅") ? "#064E3B" : exportStatus.startsWith("❌") ? "#7F1D1D" : "#1E3A8A",
+          padding: "8px 12px", 
+          background: exportStatus.startsWith("success:") ? "#064E3B" : exportStatus.startsWith("error:") ? "#7F1D1D" : "#1E3A8A",
           borderRadius: 4,
-          marginBottom: 8
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px'
         }}>
-          {exportStatus}
+          {exportStatus.startsWith("success:") && <CheckCircle size={16} />}
+          {exportStatus.startsWith("error:") && <XCircle size={16} />}
+          {exportStatus.replace(/^(success:|error:|warning:)/, '')}
         </div>
       )}
 
@@ -252,15 +271,15 @@ export default function AP3WeightsPanel({ selectedId }) {
               <h4 style={{ margin: "0 0 8px 0", fontSize: 14 }}>Evolución de Pesos por Modelo</h4>
               <ResponsiveContainer width="100%" height={300}>
                 <LineChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#444" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#ffffffff" />
                   <XAxis 
                     dataKey="step" 
-                    stroke="#888"
-                    tick={{ fontSize: 10 }}
+                    stroke="#ffffff"
+                    tick={{ fontSize: 10, fill: "#ffffff" }}
                   />
                   <YAxis 
-                    stroke="#888"
-                    tick={{ fontSize: 10 }}
+                    stroke="#ffffff"
+                    tick={{ fontSize: 10, fill: "#ffffff" }}
                   />
                   <Tooltip 
                     contentStyle={{ background: "#1a1a1a", border: "1px solid #444" }}
@@ -270,7 +289,7 @@ export default function AP3WeightsPanel({ selectedId }) {
                     ]}
                   />
                   <Legend />
-                  <ReferenceLine y={0} stroke="#666" strokeDasharray="3 3" />
+                  <ReferenceLine y={0} stroke="#ffffffff" strokeDasharray="3 3" />
                   
                   {modelNames.map(m => (
                     <Line
@@ -286,7 +305,7 @@ export default function AP3WeightsPanel({ selectedId }) {
                 </LineChart>
               </ResponsiveContainer>
               
-              <p style={{ fontSize: 10, color: "#666", marginTop: 4 }}>
+              <p style={{ fontSize: 10, color: "#ffffffff", marginTop: 4 }}>
                 Los pesos muestran el "historial acumulado" de cada modelo. 
                 Modelo con mayor peso = mejor rendimiento histórico.
               </p>
@@ -357,8 +376,8 @@ export default function AP3WeightsPanel({ selectedId }) {
                       }}>
                         {h.chosen_by_weight || "-"}
                       </td>
-                      <td style={{ padding: 4, textAlign: "center" }}>
-                        {h.choices_differ ? "⚠️" : "✅"}
+                      <td style={{ padding: 4, textAlign: "center", display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {h.choices_differ ? <AlertTriangle size={14} style={{ color: '#f59e0b' }} /> : <CheckCircle size={14} style={{ color: '#10b981' }} />}
                       </td>
                     </tr>
                   ))}
@@ -377,7 +396,10 @@ export default function AP3WeightsPanel({ selectedId }) {
                 borderRadius: 8, 
                 marginBottom: 16 
               }}>
-                <h4 style={{ margin: "0 0 8px 0", fontSize: 14 }}>📊 Comparación de Decisiones</h4>
+                <h4 style={{ margin: "0 0 8px 0", fontSize: 14, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <BarChart3 size={16} />
+                  Decision Comparison
+                </h4>
                 <div style={{ display: "flex", gap: 24, flexWrap: "wrap", fontSize: 13 }}>
                   <div>
                     <span style={{ opacity: 0.7 }}>Total steps:</span>{" "}
@@ -426,9 +448,13 @@ export default function AP3WeightsPanel({ selectedId }) {
                         <td style={{ 
                           padding: 8, 
                           color: MODEL_COLORS[model] || "#ccc",
-                          fontWeight: 600
+                          fontWeight: 600,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
                         }}>
-                          {idx === 0 && "🥇 "}{model}
+                          {idx === 0 && <Medal size={16} style={{ color: "#FFD700" }} />}
+                          {model}
                         </td>
                         <td style={{ padding: 8, textAlign: "right" }}>
                           <strong>{s.final_weight?.toFixed(2) ?? "-"}</strong>
@@ -450,9 +476,11 @@ export default function AP3WeightsPanel({ selectedId }) {
                 </tbody>
               </table>
               
-              <p style={{ fontSize: 10, color: "#666", marginTop: 8 }}>
-                💡 El modelo con mayor peso final es el que ha demostrado mejor rendimiento 
-                histórico según el sistema de ranking AP3.
+              <p style={{ fontSize: 11, color: "#aaa", marginTop: 12, display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                <Lightbulb size={14} style={{ marginTop: 2, flexShrink: 0 }} />
+                <span>
+                  The model with the highest final weight is the one that has demonstrated the best historical performance according to the AP3 ranking system.
+                </span>
               </p>
             </div>
           )}

@@ -5,6 +5,21 @@ import AP1GlobalChart from "./AP1GlobalChart";
 import AP1VerificationTable from "./AP1VerificationTable";
 import AP2SelectorTable from "./AP2SelectorTable";
 import AP4MetricsTable from "./AP4MetricsTable";
+import ConfidenceEvolutionChart from "./ConfidenceEvolutionChart";
+import { MODEL_COLORS, ALL_MODELS } from "../constants/models";
+import { 
+  Play, 
+  BarChart3, 
+  Medal, 
+  TrendingUp,
+  Info,
+  AlertTriangle,
+  CheckCircle,
+  XCircle,
+  Lightbulb
+} from 'lucide-react';
+
+// Evidencia de componente sin variable de entonrno (hardcoded)
 
 const API_BASE = "http://localhost:8081";
 const DEFAULT_HOURS = 24;
@@ -13,14 +28,14 @@ const FULL_HOURS = 999; // Para obtener todos los datos disponibles
 const TABS = {
   DEMO: "demo",
   GLOBAL_STATS: "global_stats",
-  AP1_GLOBAL: "ap1_global",
-  AP2_SELECTOR: "ap2_selector",
-  AP4_METRICS: "ap4_metrics",
+  MODELS_RANKING: "models_ranking",
+  CONFIDENCE_EVOLUTION: "confidence_evolution",
   AP1_ZOOM: "ap1_zoom",
   VERIFY: "verify",
 };
 
 const PredictionPanel = forwardRef((props, ref) => {
+  const { onAnalyticsDataUpdate } = props;
   const [currentId, setCurrentId] = useState("");
   const [points, setPoints] = useState([]);
   const [selectorData, setSelectorData] = useState([]);
@@ -31,6 +46,13 @@ const PredictionPanel = forwardRef((props, ref) => {
   const [activeTab, setActiveTab] = useState(TABS.DEMO);
   const [zoomStartIdx, setZoomStartIdx] = useState(0);
   const [viewMode, setViewMode] = useState("demo"); // "demo" (1h) o "full" (todos los datos)
+  const [forecastHorizon, setForecastHorizon] = useState(1); // Horizonte de predicción seleccionado
+
+  // Helper: Map model names for display (e.g., "base" -> "naive")
+  const displayModelName = (modelName) => {
+    const mapping = { "base": "naive" };
+    return mapping[modelName] || modelName;
+  };
 
   // Exponer método refreshData para que App.jsx pueda llamarlo
   useImperativeHandle(ref, () => ({
@@ -61,6 +83,26 @@ const PredictionPanel = forwardRef((props, ref) => {
     };
   }, []);
 
+  // Fetch the selected forecast horizon
+  useEffect(() => {
+    const fetchHorizon = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/forecast_horizon`);
+        if (res.ok) {
+          const data = await res.json();
+          const horizon = data.forecast_horizon || 1;
+          setForecastHorizon(horizon);
+          console.log("[PredictionPanel] Fetched forecast horizon:", horizon);
+        }
+      } catch (err) {
+        console.error("[PredictionPanel] Error fetching forecast horizon:", err);
+      }
+    };
+
+    // Fetch on refresh or when tab changes
+    fetchHorizon();
+  }, [refreshKey]);
+
   // Fetch IDs disponibles al inicio (si no hay currentId)
   useEffect(() => {
     const fetchIds = async () => {
@@ -85,6 +127,52 @@ const PredictionPanel = forwardRef((props, ref) => {
     // Fetch IDs al montar y cada vez que refreshKey cambie
     fetchIds();
   }, [refreshKey]);
+
+  // Calculate T+1 data (ALWAYS baseline, regardless of selected horizon)
+  const dataForT1Chart = useMemo(() => {
+    if (points.length === 0) return [];
+    
+    return points.map((point, i) => {
+      if (i === 0) return null; // Skip first point (no previous prediction)
+      
+      const prevPoint = points[i - 1];
+      return {
+        x: point.t_decision || point.timestamp,
+        var: Number.isFinite(point?.var) ? point.var : undefined,
+        prediction: Number.isFinite(prevPoint?.prediction) ? prevPoint.prediction : undefined,
+        // Add individual models from previous point
+        linear: Number.isFinite(prevPoint?.linear) ? prevPoint.linear : undefined,
+        poly: Number.isFinite(prevPoint?.poly) ? prevPoint.poly : undefined,
+        kalman: Number.isFinite(prevPoint?.kalman) ? prevPoint.kalman : undefined,
+        alphabeta: Number.isFinite(prevPoint?.alphabeta) ? prevPoint.alphabeta : undefined,
+        naive: Number.isFinite(prevPoint?.naive || prevPoint?.base) ? (prevPoint.naive || prevPoint.base) : undefined,
+      };
+    }).filter(p => p !== null);
+  }, [points]);
+
+  // Calculate T+M data for confidence evolution chart
+  // Compare predictions at T with actual values at T+M (shifted by forecastHorizon)
+  const horizonDataForChart = useMemo(() => {
+    if (forecastHorizon <= 1 || points.length === 0) {
+      return [];
+    }
+    
+    // For each point at index i (time T), compare prediction with actual at i+forecastHorizon (time T+M)
+    const result = [];
+    for (let i = 0; i < points.length - forecastHorizon; i++) {
+      const pointAtT = points[i];
+      const pointAtTplusM = points[i + forecastHorizon];
+      
+      result.push({
+        actualAtTplusM: Number.isFinite(pointAtTplusM?.var) ? pointAtTplusM.var : undefined,
+        predictionAtT: Number.isFinite(pointAtT?.prediction) ? pointAtT.prediction : undefined,
+        varAtT: Number.isFinite(pointAtT?.var) ? pointAtT.var : undefined,
+        x: pointAtT?.t_decision || pointAtT?.timestamp,
+      });
+    }
+    
+    return result;
+  }, [points, forecastHorizon]);
 
   // Fetch a /api/series y endpoints relacionados
   useEffect(() => {
@@ -168,35 +256,124 @@ const PredictionPanel = forwardRef((props, ref) => {
     };
   }, [currentId, refreshKey, viewMode]);
 
+  // Notificar a App.jsx sobre cambios en analyticsData (para AnalysisModal)
+  useEffect(() => {
+    if (onAnalyticsDataUpdate) {
+      // En modo demo, filtrar points a las últimas 24h
+      let demoPointsData = points;
+      if (viewMode === "demo") {
+        const now = Date.now();
+        const oneDayAgo = now - 24 * 60 * 60 * 1000;
+        demoPointsData = points.filter(p => {
+          const t = p.t ? new Date(p.t).getTime() : 0;
+          return t >= oneDayAgo;
+        });
+      }
+
+      onAnalyticsDataUpdate({
+        selectorData,
+        viewMode,
+        demoPoints: demoPointsData,
+      });
+    }
+  }, [selectorData, viewMode, points, onAnalyticsDataUpdate]);
+
   const info = useMemo(() => {
-    if (!points.length) return { nObs: 0, nPred: 0, nModels: 0 };
+    if (!points.length) return { nObs: 0, nPred: 0, nModels: 0, confidence: 0 };
+    
+    // For confidence calculation, always use T+1 data (horizon=1 or no horizon field)
+    // This represents the "standard" system confidence
+    const t1Points = points.filter(p => {
+      // If horizon field doesn't exist, include it (backward compatibility, assume T+1)
+      if (p.horizon === undefined) return true;
+      // Only include T+1 points for confidence calculation
+      return p.horizon === 1;
+    });
+    
+    // For statistics, use all points to show complete data count
     const nObs = points.filter(r => typeof r.var === "number").length;
     const nPred = points.filter(r => typeof r.prediction === "number").length;
+    
     const modelKeys = new Set();
+    
     for (const p of points) {
       Object.keys(p).forEach(k => {
-        if (!["t", "var", "prediction", "chosen_model", "error_abs", "error_rel"].includes(k) && typeof p[k] === "number") {
+        // Solo contar modelos conocidos que tengan predicciones
+        if (ALL_MODELS.includes(k) && typeof p[k] === "number") {
           modelKeys.add(k);
         }
       });
+    }    
+    
+    // Calcular confianza solo para T+1 (standard performance): (1 - Mean MAPE%)
+    // NOTE: chosen_error_rel and error_rel come from backend as PERCENTAGE (0-100), not as ratio (0-1)
+    const errorsRel = t1Points
+      .map(p => p.chosen_error_rel || p.error_rel)
+      .filter(e => typeof e === "number" && !isNaN(e) && isFinite(e));
+    
+    let confidence = 0;
+    if (errorsRel.length > 0) {
+      const meanErrorRel = errorsRel.reduce((a, b) => a + Math.abs(b), 0) / errorsRel.length;
+      // error_rel is already percentage (0-100), so just subtract from 100 and clamp
+      confidence = Math.max(0, Math.min(100, 100 - meanErrorRel));
     }
-    return { nObs, nPred, nModels: modelKeys.size, models: [...modelKeys] };
+    
+    return { nObs, nPred, nModels: modelKeys.size, models: [...modelKeys], confidence };
   }, [points]);
 
+  // Calculate horizon confidence for the selected forecast horizon
+  const horizonConfidence = useMemo(() => {
+    if (forecastHorizon <= 1 || points.length === 0) {
+      return { avgConfidence: 0, count: 0 };
+    }
+
+    const confidences = [];
+    
+    // Create a map of predictions by index (shifted)
+    const predictionsByIndex = new Map();
+    points.forEach((point, idx) => {
+      if (Number.isFinite(point.prediction)) {
+        predictionsByIndex.set(idx + 1, point.prediction);
+      }
+    });
+    
+    // Process points starting from index 1
+    for (let idx = 1; idx < points.length; idx++) {
+      const point = points[idx];
+      const pointHorizon = point.horizon || 1;
+      
+      if (pointHorizon === forecastHorizon) {
+        const predictionAtT = predictionsByIndex.get(idx);
+        const actualAtTplusM = Number.isFinite(point.var) ? point.var : undefined;
+        
+        if (Number.isFinite(predictionAtT) && Number.isFinite(actualAtTplusM)) {
+          const error = Math.abs(predictionAtT - actualAtTplusM);
+          const errorRel = (error / Math.abs(actualAtTplusM)) * 100;
+          const confidence = Math.max(0, Math.min(100, 100 - errorRel));
+          confidences.push(confidence);
+        }
+      }
+    }
+    
+    const avgConfidence = confidences.length > 0
+      ? confidences.reduce((a, b) => a + b, 0) / confidences.length
+      : 0;
+    
+    return { avgConfidence, count: confidences.length };
+  }, [points, forecastHorizon]);
+
   const tabButtons = [
-    { id: TABS.DEMO, label: "🎯 Demo Principal", icon: "presentation" },
-    { id: TABS.GLOBAL_STATS, label: "🌐 Vista Global Completa", icon: "analytics" },
-    { id: TABS.AP2_SELECTOR, label: "📋 Tabla Selector (AP2)", icon: "list" },
-    { id: TABS.AP4_METRICS, label: "🏆 Ranking Modelos (AP4)", icon: "medal" },
-    { id: TABS.AP1_GLOBAL, label: "📊 Vista Gráfica (AP1)", icon: "globe" },
-    { id: TABS.AP1_ZOOM, label: "🔍 Zoom Detalle", icon: "zoom", hidden: true },
-    { id: TABS.VERIFY, label: "✓ Verificación", icon: "check", hidden: true },
+    { id: TABS.DEMO, label: "Demo", icon: Play },
+    { id: TABS.GLOBAL_STATS, label: "Complete Analysis", icon: BarChart3 },
+    { id: TABS.CONFIDENCE_EVOLUTION, label: "Confidence Evolution", icon: TrendingUp },
+    { id: TABS.AP1_ZOOM, label: "Zoom Detail", icon: null, hidden: true },
+    { id: TABS.VERIFY, label: "Verification", icon: null, hidden: true },
   ];
 
   return (
     <div style={{ color: "white", padding: "16px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <h2 style={{ margin: 0 }}>🧠 HyperModel: Sistema de Predicción Adaptativa</h2>
+        <h2 style={{ margin: 0 }}> Adaptive Telemetry Predictor </h2>
       </div>
 
       <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 12, padding: "8px", backgroundColor: "#222", borderRadius: 4, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -206,9 +383,9 @@ const PredictionPanel = forwardRef((props, ref) => {
           <strong>Observaciones:</strong> {info.nObs}
           {" · "}
           <strong>Predicciones:</strong> {info.nPred}
-          {info.nModels > 0 && (
+          {/* {info.nModels > 0 && (
             <> · <strong>Modelos activos:</strong> {info.models?.join(", ")}</>
-          )}
+          )} */}
         </div>
         
         {/* Toggle Vista Demo / Completa */}
@@ -220,14 +397,14 @@ const PredictionPanel = forwardRef((props, ref) => {
               padding: "4px 10px",
               fontSize: 11,
               background: viewMode === "demo" ? "#FF7A00" : "#444",
-              border: "1px solid #666",
+              border: "1px solid #ffffffff",
               borderRadius: 3,
               color: "#fff",
               cursor: "pointer",
               fontWeight: viewMode === "demo" ? "bold" : "normal",
             }}
           >
-            📊 Demo (últimas 24h)
+            Demo (últimas 24h)
           </button>
           <button
             onClick={() => setViewMode("full")}
@@ -235,14 +412,14 @@ const PredictionPanel = forwardRef((props, ref) => {
               padding: "4px 10px",
               fontSize: 11,
               background: viewMode === "full" ? "#FF7A00" : "#444",
-              border: "1px solid #666",
+              border: "1px solid #ffffffff",
               borderRadius: 3,
               color: "#fff",
               cursor: "pointer",
               fontWeight: viewMode === "full" ? "bold" : "normal",
             }}
           >
-            🌐 Completa (todos los datos)
+            Completa (todos los datos)
           </button>
         </div>
       </div>
@@ -250,24 +427,32 @@ const PredictionPanel = forwardRef((props, ref) => {
       {/* Tab buttons */}
       {points.length > 0 && (
         <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-          {tabButtons.filter(btn => !btn.hidden).map((btn) => (
-            <button
-              key={btn.id}
-              onClick={() => setActiveTab(btn.id)}
-              style={{
-                padding: "6px 12px",
-                background: activeTab === btn.id ? "#FF7A00" : "#333",
-                border: "1px solid #555",
-                borderRadius: 4,
-                color: "#fff",
-                cursor: "pointer",
-                fontSize: 12,
-                fontWeight: activeTab === btn.id ? "bold" : "normal",
-              }}
-            >
-              {btn.label}
-            </button>
-          ))}
+          {tabButtons.filter(btn => !btn.hidden).map((btn) => {
+            const Icon = btn.icon;
+            return (
+              <button
+                key={btn.id}
+                onClick={() => setActiveTab(btn.id)}
+                style={{
+                  padding: "8px 16px",
+                  background: activeTab === btn.id ? "#FF7A00" : "#333",
+                  border: "1px solid #555",
+                  borderRadius: 6,
+                  color: "#fff",
+                  cursor: "pointer",
+                  fontSize: 12,
+                  fontWeight: activeTab === btn.id ? "bold" : "normal",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  transition: "all 0.2s"
+                }}
+              >
+                {Icon && <Icon size={16} />}
+                {btn.label}
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -275,8 +460,8 @@ const PredictionPanel = forwardRef((props, ref) => {
       {error && <p style={{ fontSize: 12, color: "#fca5a5" }}>{error}</p>}
 
       {!loading && !error && points.length === 0 && (
-        <p style={{ fontSize: 12, color: "#999" }}>
-          Sin datos disponibles. Ejecuta el pipeline primero para cargar una serie temporal.
+        <p style={{ fontSize: 12, color: "#ffffffff" }}>
+          No data yet. Please run the pipeline first to load a time series.
         </p>
       )}
 
@@ -285,18 +470,27 @@ const PredictionPanel = forwardRef((props, ref) => {
           {activeTab === TABS.DEMO && (
             <div>
               <div style={{ marginBottom: 24 }}>
-                <h3 style={{ fontSize: 16, marginBottom: 12 }}>📈 Serie Real vs Predicción Adaptativa</h3>
-                <AP1GlobalChart data={points} />
+                <h3 style={{ fontSize: 16, marginBottom: 12, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Play size={20} />
+                  Live Predictions
+                </h3>
+                <AP1GlobalChart data={dataForT1Chart} rawData={points} forecastHorizon={forecastHorizon} />
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 24 }}>
                 <div>
-                  <h3 style={{ fontSize: 16, marginBottom: 12 }}>📋 Decisiones del Selector (AP2)</h3>
+                  <h3 style={{ fontSize: 16, marginBottom: 12, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <BarChart3 size={18} />
+                    Selector Decisions
+                  </h3>
                   <AP2SelectorTable data={selectorData} maxRows={10} />
                 </div>
 
                 <div>
-                  <h3 style={{ fontSize: 16, marginBottom: 12 }}>🏆 Ranking de Modelos (AP4)</h3>
+                  <h3 style={{ fontSize: 16, marginBottom: 12, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Medal size={18} style={{ color: '#f59e0b' }} />
+                    Model Rankings
+                  </h3>
                   <AP4MetricsTable data={metricsData} />
                 </div>
               </div>
@@ -305,7 +499,10 @@ const PredictionPanel = forwardRef((props, ref) => {
 
           {activeTab === TABS.GLOBAL_STATS && (
             <div>
-              <h3 style={{ fontSize: 18, marginBottom: 16 }}>🌐 Análisis Global Completo - Todos los Datos</h3>
+              <h3 style={{ fontSize: 18, marginBottom: 16, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <BarChart3 size={22} />
+                Complete Global Analysis - All Data
+              </h3>
               
               {/* Estadísticas generales */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginBottom: 24 }}>
@@ -325,17 +522,87 @@ const PredictionPanel = forwardRef((props, ref) => {
                   <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>Modelos Activos</div>
                   <div style={{ fontSize: 24, fontWeight: "bold", color: "#a78bfa" }}>{info.nModels}</div>
                 </div>
+                {forecastHorizon === 1 && (
+                  <div style={{ 
+                    background: "linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%)", 
+                    padding: 16, 
+                    borderRadius: 6, 
+                    border: `2px solid ${info.confidence >= 85 ? "#10b981" : info.confidence >= 75 ? "#f59e0b" : "#ef4444"}`,
+                  }}>
+                    <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>
+                      Overall Confidence Score (T+1 Standard)
+                      <span style={{ marginLeft: 8, fontSize: 9, opacity: 0.6 }}>
+                        (1 - Mean Relative Error)
+                      </span>
+                    </div>
+                    <div style={{ 
+                      fontSize: 32, 
+                      fontWeight: "bold", 
+                      color: info.confidence >= 85 ? "#10b981" : info.confidence >= 75 ? "#f59e0b" : "#ef4444",
+                      fontFamily: "monospace"
+                    }}>
+                      {info.confidence.toFixed(2)}%
+                    </div>
+                    <div style={{ fontSize: 10, opacity: 0.6, marginTop: 4, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      {info.confidence >= 85 ? (
+                        <><CheckCircle size={14} style={{ color: '#10b981' }} /> Excellent accuracy</>
+                      ) : info.confidence >= 75 ? (
+                        <><AlertTriangle size={14} style={{ color: '#f59e0b' }} /> Acceptable accuracy</>
+                      ) : (
+                        <><XCircle size={14} style={{ color: '#ef4444' }} /> Low accuracy</>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
+              {forecastHorizon > 1 && horizonConfidence.count > 0 && (
+                <div style={{ marginBottom: 24 }}>
+                  <div style={{ 
+                    background: "linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%)", 
+                    padding: 20, 
+                    borderRadius: 6, 
+                    border: `2px solid ${horizonConfidence.avgConfidence >= 85 ? "#10b981" : horizonConfidence.avgConfidence >= 75 ? "#f59e0b" : "#ef4444"}`,
+                    maxWidth: 500
+                  }}>
+                    <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>
+                      Prediction Confidence at T+{forecastHorizon}
+                      <span style={{ marginLeft: 8, fontSize: 9, opacity: 0.6 }}>
+                        (1 - Mean Relative Error)
+                      </span>
+                    </div>
+                    <div style={{ 
+                      fontSize: 32, 
+                      fontWeight: "bold", 
+                      color: horizonConfidence.avgConfidence >= 85 ? "#10b981" : horizonConfidence.avgConfidence >= 75 ? "#f59e0b" : "#ef4444",
+                      fontFamily: "monospace"
+                    }}>
+                      {horizonConfidence.avgConfidence.toFixed(2)}%
+                    </div>
+                    <div style={{ fontSize: 10, opacity: 0.6, marginTop: 4, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      {horizonConfidence.avgConfidence >= 85 ? (
+                        <><CheckCircle size={14} style={{ color: '#10b981' }} /> Excellent accuracy</>
+                      ) : horizonConfidence.avgConfidence >= 75 ? (
+                        <><AlertTriangle size={14} style={{ color: '#f59e0b' }} /> Acceptable accuracy</>
+                      ) : (
+                        <><XCircle size={14} style={{ color: '#ef4444' }} /> Low accuracy</>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Distribución de modelos elegidos */}
               <div style={{ background: "#1a1a1a", padding: 16, borderRadius: 6, border: "1px solid #333", marginBottom: 24 }}>
-                <h4 style={{ fontSize: 14, marginBottom: 12, color: "#FF7A00" }}>
-                  📊 Distribución de Modelos Elegidos (chosen_model)
+                <h4 style={{ fontSize: 14, marginBottom: 12, color: "#FF7A00", display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <BarChart3 size={18} />
+                  Model Selection Distribution
                 </h4>
                 {(() => {
                   const modelCounts = {};
                   points.forEach(p => {
-                    const m = p.chosen_model;
+                    let m = p.chosen_model;
+                    // Map "base" to "naive" for display
+                    m = displayModelName(m);
                     if (m) modelCounts[m] = (modelCounts[m] || 0) + 1;
                   });
                   const total = Object.values(modelCounts).reduce((a, b) => a + b, 0);
@@ -354,7 +621,8 @@ const PredictionPanel = forwardRef((props, ref) => {
                                     background: model === "linear" ? "#3b82f6" : 
                                                model === "poly" ? "#10b981" : 
                                                model === "alphabeta" ? "#f59e0b" : 
-                                               model === "kalman" ? "#8b5cf6" : "#6b7280",
+                                               model === "kalman" ? "#8b5cf6" :
+                                               model === "naive" ? "#6b7280" : "#6b7280",
                                     height: "100%",
                                     borderRadius: 4,
                                     width: `${pct}%`,
@@ -379,24 +647,27 @@ const PredictionPanel = forwardRef((props, ref) => {
 
               {/* Gráfico completo */}
               <div style={{ marginBottom: 24 }}>
-                <h4 style={{ fontSize: 14, marginBottom: 12, color: "#FF7A00" }}>
-                  📈 Visualización Completa de la Serie
+                <h4 style={{ fontSize: 14, marginBottom: 12, color: "#FF7A00", display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <TrendingUp size={18} />
+                  Complete Series Visualization
                 </h4>
-                <AP1GlobalChart data={points} />
+                <AP1GlobalChart data={dataForT1Chart} rawData={points} forecastHorizon={forecastHorizon} />
               </div>
 
               {/* Tabla completa con todos los puntos */}
               <div style={{ marginBottom: 24 }}>
-                <h4 style={{ fontSize: 14, marginBottom: 12, color: "#FF7A00" }}>
-                  📋 Tabla Completa de Decisiones (todos los puntos)
+                <h4 style={{ fontSize: 14, marginBottom: 12, color: "#FF7A00", display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Info size={18} />
+                  Complete Decision Table
                 </h4>
                 <AP2SelectorTable data={selectorData} maxRows={9999} />
               </div>
 
-              {/* Métricas de rendimiento */}
+              {/* Métricas de rendimiento con panel formal */}
               <div>
-                <h4 style={{ fontSize: 14, marginBottom: 12, color: "#FF7A00" }}>
-                  🏆 Ranking Final de Modelos
+                <h4 style={{ fontSize: 20, marginBottom: 16, color: "#ffffffff", display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Medal size={24} style={{ color: '#f59e0b' }} />
+                  Model Performance Rankings
                 </h4>
                 <AP4MetricsTable data={metricsData} />
               </div>
@@ -412,16 +683,12 @@ const PredictionPanel = forwardRef((props, ref) => {
             />
           )}
 
-          {activeTab === TABS.AP1_GLOBAL && (
-            <AP1GlobalChart data={points} />
-          )}
-
-          {activeTab === TABS.AP2_SELECTOR && (
-            <AP2SelectorTable data={selectorData} maxRows={500} />
-          )}
-
-          {activeTab === TABS.AP4_METRICS && (
-            <AP4MetricsTable data={metricsData} />
+          {activeTab === TABS.CONFIDENCE_EVOLUTION && (
+            <ConfidenceEvolutionChart 
+              data={points} 
+              forecastHorizon={forecastHorizon}
+              horizonData={horizonDataForChart}
+            />
           )}
 
           {activeTab === TABS.VERIFY && (

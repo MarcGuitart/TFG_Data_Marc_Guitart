@@ -10,6 +10,7 @@ import {
   ResponsiveContainer,
   ReferenceLine,
 } from "recharts";
+import { Play, CheckCircle, AlertTriangle, XCircle, Activity } from 'lucide-react';
 import "./LivePredictionChart.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8081";
@@ -89,6 +90,7 @@ export default function LivePredictionChart({ selectedId, isRunning }) {
           linear: point.hyper_models?.linear || null,
           poly: point.hyper_models?.poly || null,
           alphabeta: point.hyper_models?.alphabeta || null,
+          naive: point.hyper_models?.naive || null,
           error: error,
           chosen: point.chosen_model || "-",
           errorAbs: point.chosen_error_abs || null,
@@ -182,7 +184,10 @@ export default function LivePredictionChart({ selectedId, isRunning }) {
   return (
     <div className="live-prediction-chart-container">
       <div className="live-header">
-        <h3>🎯 Predicción en Tiempo Real</h3>
+        <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Activity size={20} />
+          Live Predictions
+        </h3>
         <div className="live-controls">
           <label>
             Window Size:
@@ -194,7 +199,7 @@ export default function LivePredictionChart({ selectedId, isRunning }) {
               value={windowSize}
               onChange={(e) => setWindowSize(parseInt(e.target.value))}
             />
-            <span>{windowSize} puntos</span>
+            <span>{windowSize} points</span>
           </label>
           <label>
             <input
@@ -211,7 +216,7 @@ export default function LivePredictionChart({ selectedId, isRunning }) {
       <div className="live-progress">
         <div className="progress-info">
           <span className="progress-text">
-            {stats.processedPoints} / {stats.totalPoints} puntos procesados
+            {stats.processedPoints} / {stats.totalPoints} points processed
           </span>
           <span className="progress-percent">
             {stats.progress.toFixed(1)}%
@@ -224,19 +229,20 @@ export default function LivePredictionChart({ selectedId, isRunning }) {
           />
         </div>
         <div className="progress-stats">
-          <span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             Status:{" "}
             <strong
               className={`status-badge status-${stats.status}`}
+              style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
             >
-              {stats.status === STATUS.IDLE && "⏸️ En espera"}
-              {stats.status === STATUS.RUNNING && "▶️ EN DIRECTO"}
-              {stats.status === STATUS.FINISHED && "✅ Completado"}
-              {stats.status === STATUS.ERROR && "❌ Error"}
+              {stats.status === STATUS.IDLE && <><Play size={12} /> Waiting</>}
+              {stats.status === STATUS.RUNNING && <><Activity size={12} className="spin" /> LIVE</>}
+              {stats.status === STATUS.FINISHED && <><CheckCircle size={12} /> Completed</>}
+              {stats.status === STATUS.ERROR && <><XCircle size={12} /> Error</>}
             </strong>
           </span>
           <span>
-            Error Promedio: <strong>{stats.avgError}</strong>
+            Average Error: <strong>{stats.avgError}</strong>
           </span>
         </div>
       </div>
@@ -245,7 +251,7 @@ export default function LivePredictionChart({ selectedId, isRunning }) {
       <div className="live-chart-wrapper">
         {displayData.length === 0 ? (
           <div className="live-empty">
-            <p>Esperando datos...</p>
+            <p>Waiting for data...</p>
             <p className="text-small">Carga un CSV y ejecuta el pipeline para ver las predicciones en tiempo real</p>
           </div>
         ) : (
@@ -257,11 +263,11 @@ export default function LivePredictionChart({ selectedId, isRunning }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
               <XAxis
                 dataKey="index"
-                stroke="#6b7280"
-                tick={{ fontSize: 12 }}
+                stroke="#ffffff"
+                tick={{ fontSize: 12, fill: "#ffffff" }}
                 interval={Math.floor(displayData.length / 10)}
               />
-              <YAxis stroke="#6b7280" tick={{ fontSize: 12 }} />
+              <YAxis stroke="#ffffff" tick={{ fontSize: 12, fill: "#ffffff" }} />
               <Tooltip
                 contentStyle={{
                   backgroundColor: "#ffffff",

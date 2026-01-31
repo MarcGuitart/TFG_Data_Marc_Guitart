@@ -35,7 +35,8 @@ export default function AP1PerModelChart({ data = [], startIdx = 0, windowSize =
   const processedData = useMemo(() => {
     const rows = (Array.isArray(data) ? data : [])
       .map((d) => {
-        const x = d.x || (Number.isFinite(d?.t) ? new Date(d.t).toISOString().slice(0, 19) + "Z" : undefined);
+        // Use t_decision for predictions (when they were made)
+        const x = d.t_decision || d.x || (Number.isFinite(d?.t) ? new Date(d.t).toISOString().slice(0, 19) + "Z" : undefined);
         if (!x) return null;
 
         const base = {
@@ -43,12 +44,13 @@ export default function AP1PerModelChart({ data = [], startIdx = 0, windowSize =
           var: Number.isFinite(d?.var) ? d.var : undefined,
           prediction: Number.isFinite(d?.prediction) ? d.prediction : undefined,
           chosen_model: d?.chosen_model || undefined,
+          horizon: d?.horizon || 1,
         };
 
         // Copiar predicciones de modelos individuales
         for (const [k, v] of Object.entries(d)) {
           if (
-            !["x", "t", "var", "prediction", "pred_conf", "chosen_model"].includes(k) &&
+            !["x", "t", "t_decision", "var", "prediction", "pred_conf", "chosen_model", "horizon"].includes(k) &&
             Number.isFinite(v)
           ) {
             base[k] = v;
@@ -86,7 +88,7 @@ export default function AP1PerModelChart({ data = [], startIdx = 0, windowSize =
     Object.keys(row).forEach((k) => keySet.add(k));
   }
   const modelKeys = [...keySet].filter(
-    (k) => !["x", "var", "prediction", "chosen_model"].includes(k)
+    (k) => !["x", "var", "prediction", "chosen_model", "horizon", "t_decision"].includes(k)
   );
 
   const handleZoomNext = () => {
@@ -112,8 +114,8 @@ export default function AP1PerModelChart({ data = [], startIdx = 0, windowSize =
 
   return (
     <div style={{ width: "100%", marginBottom: 20 }}>
-      <h3>AP1: Zoom de modelos adaptativos (~{windowSize} puntos)</h3>
-      <p style={{ fontSize: 12, color: "#666" }}>
+      <h3>Zoom de modelos adaptativos (~{windowSize} puntos)</h3>
+      <p style={{ fontSize: 12, color: "#ffffffff" }}>
         Observa cómo el modelo adaptativo (naranja gruesa) salta entre modelos base (colores claros)
       </p>
 
@@ -128,7 +130,7 @@ export default function AP1PerModelChart({ data = [], startIdx = 0, windowSize =
           style={{ flex: 1 }}
         />
         <button onClick={handleZoomNext} style={{ padding: "5px 10px" }}>Siguiente →</button>
-        <span style={{ fontSize: 12, color: "#666" }}>
+        <span style={{ fontSize: 12, color: "#ffffffff" }}>
           Puntos {localStartIdx + 1}–{Math.min(localStartIdx + windowSize, data.length)} de {data.length}
         </span>
       </div>
@@ -141,9 +143,11 @@ export default function AP1PerModelChart({ data = [], startIdx = 0, windowSize =
               dataKey="x"
               tickFormatter={(v) => (v ? new Date(v).toLocaleTimeString() : "")}
               minTickGap={20}
+              tick={{ fill: "#ffffff" }}
+              stroke="#ffffff"
               interval="preserveStartEnd"
             />
-            <YAxis allowDataOverflow width={50} />
+            <YAxis allowDataOverflow width={50} tick={{ fill: "#ffffff" }} stroke="#ffffff" />
             <Tooltip
               labelFormatter={(v) => fmt(v)}
               formatter={(value, name) => {

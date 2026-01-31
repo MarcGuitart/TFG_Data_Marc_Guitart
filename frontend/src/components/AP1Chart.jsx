@@ -38,6 +38,8 @@ export default function AP1Chart({ data = [] }) {
   // Normalizar datos
   const norm = useMemo(() => {
     const toIso = (d) => {
+      // Use t_decision for predictions (when they were made)
+      if (d?.t_decision) return d.t_decision;
       if (typeof d?.x === "string") return d.x;
       if (Number.isFinite(d?.t)) return new Date(d.t).toISOString().slice(0, 19) + "Z";
       return undefined;
@@ -54,12 +56,13 @@ export default function AP1Chart({ data = [] }) {
           var: Number.isFinite(d?.var) ? d.var : undefined,
           prediction: Number.isFinite(d?.prediction) ? d.prediction : undefined,
           chosen_model: d?.chosen_model || undefined,
+          horizon: d?.horizon || 1,
         };
 
         // Copiar predicciones de modelos individuales
         for (const [k, v] of Object.entries(d)) {
           if (
-            !["x", "t", "var", "prediction", "pred_conf", "chosen_model"].includes(k) &&
+            !["x", "t", "t_decision", "var", "prediction", "pred_conf", "chosen_model", "horizon"].includes(k) &&
             Number.isFinite(v)
           ) {
             base[k] = v;
@@ -78,7 +81,7 @@ export default function AP1Chart({ data = [] }) {
       Object.keys(row).forEach((k) => keySet.add(k));
     }
     return [...keySet].filter(
-      (k) => !["x", "idx", "var", "prediction", "pred_conf", "chosen_model"].includes(k)
+      (k) => !["x", "idx", "var", "prediction", "pred_conf", "chosen_model", "horizon", "t_decision"].includes(k)
     );
   }, [norm]);
 
@@ -157,12 +160,12 @@ export default function AP1Chart({ data = [] }) {
       {/* GLOBAL VIEW */}
       <div style={{ marginBottom: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-          <h4 style={{ margin: 0 }}>📊 Vista Global ({norm.length} puntos)</h4>
+          <h4 style={{ margin: 0 }}>Vista Global ({norm.length} puntos)</h4>
           <span style={{ fontSize: 12, opacity: 0.7 }}>
             Arrastra para seleccionar rango de zoom
           </span>
         </div>
-        <div style={{ width: "100%", height: 150, background: "#1a1a1a", borderRadius: 8, padding: "8px 0" }}>
+        <div style={{ width: "100%", height: 150, background: "#ffffffff", borderRadius: 8, padding: "8px 0" }}>
           <ResponsiveContainer>
             <ComposedChart
               data={norm}
@@ -175,7 +178,8 @@ export default function AP1Chart({ data = [] }) {
               <XAxis
                 dataKey="x"
                 tickFormatter={(v) => (v ? new Date(v).toLocaleTimeString().slice(0, 5) : "")}
-                tick={{ fontSize: 10 }}
+                tick={{ fontSize: 10, fill: "#ffffff" }}
+                stroke="#ffffff"
                 interval="preserveStartEnd"
               />
               <YAxis hide />
@@ -232,7 +236,7 @@ export default function AP1Chart({ data = [] }) {
       <div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
           <h4 style={{ margin: 0 }}>
-            🔍 Vista Detallada 
+            Vista Detallada 
             {zoomStart !== null && zoomEnd !== null && (
               <span style={{ fontWeight: 400, fontSize: 14, marginLeft: 8 }}>
                 (puntos {Math.min(zoomStart, zoomEnd) + 1} - {Math.max(zoomStart, zoomEnd) + 1})
@@ -244,8 +248,8 @@ export default function AP1Chart({ data = [] }) {
               onClick={resetZoom}
               style={{
                 padding: "4px 12px",
-                background: "#333",
-                border: "1px solid #555",
+                background: "#ffffffff",
+                border: "1px solid #ffffffff",
                 borderRadius: 4,
                 color: "#fff",
                 cursor: "pointer",
@@ -286,9 +290,11 @@ export default function AP1Chart({ data = [] }) {
                 dataKey="x"
                 tickFormatter={(v) => (v ? new Date(v).toLocaleTimeString() : "")}
                 minTickGap={40}
+                tick={{ fill: "#ffffff" }}
+                stroke="#ffffff"
                 interval="preserveStartEnd"
               />
-              <YAxis allowDataOverflow width={50} />
+              <YAxis allowDataOverflow width={50} tick={{ fill: "#ffffff" }} stroke="#ffffff" />
               <Tooltip
                 labelFormatter={(v) => fmt(v)}
                 formatter={(value, name, props) => {

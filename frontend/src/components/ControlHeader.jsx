@@ -1,14 +1,40 @@
 import React, { useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { 
+  Upload, 
+  Play, 
+  Download, 
+  RefreshCw, 
+  Loader2,
+  CheckCircle,
+  XCircle,
+  AlertTriangle,
+  Target,
+  BarChart3,
+  Brain,
+  Lightbulb,
+  X as CloseIcon
+} from 'lucide-react';
+import AnalysisModal from "./AnalysisModal";
 import "./ControlHeader.css";
+
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8081";
 
-export default function ControlHeader({ onIdsUpdate }) {
+export default function ControlHeader({ onIdsUpdate, analyticsData = {} }) {
   const [uploading, setUploading] = useState(false);
   const [running, setRunning] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [message, setMessage] = useState("");
+  const [analysisResult, setAnalysisResult] = useState(null);
+  const [showAnalysisModal, setShowAnalysisModal] = useState(false);
+  
+  // Forecast Horizon state
+  const [forecastHorizon, setForecastHorizon] = useState(1);
+  const [customHorizon, setCustomHorizon] = useState("");
 
   // Upload CSV
   const handleUpload = async (e) => {
@@ -16,7 +42,7 @@ export default function ControlHeader({ onIdsUpdate }) {
     if (!file) return;
 
     setUploading(true);
-    setMessage("⏳ Subiendo archivo...");
+    setMessage("Uploading file...");
 
     try {
       const formData = new FormData();
@@ -30,10 +56,10 @@ export default function ControlHeader({ onIdsUpdate }) {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       const data = await res.json();
-      setMessage(`✅ Archivo subido: ${file.name}`);
+      setMessage(`success:File uploaded: ${file.name}`);
       console.log("Upload response:", data);
     } catch (err) {
-      setMessage(`❌ Error: ${err.message}`);
+      setMessage(`error:Upload error: ${err.message}`);
       console.error("Upload error:", err);
     } finally {
       setUploading(false);
@@ -45,10 +71,10 @@ export default function ControlHeader({ onIdsUpdate }) {
   // Run pipeline
   const handleRun = async () => {
     setRunning(true);
-    setMessage("⏳ Ejecutando pipeline...");
+    setMessage("Running pipeline...");
 
     try {
-      const res = await fetch(`${API_BASE}/api/run_window`, {
+      const res = await fetch(`${API_BASE}/api/run_window?forecast_horizon=${forecastHorizon}`, {
         method: "POST",
       });
 
@@ -60,9 +86,10 @@ export default function ControlHeader({ onIdsUpdate }) {
       const rows = data.loader_response?.rows || data.rows_flushed || 0;
       const uniqueIds = data.loader_response?.unique_ids || [];
       
-      setMessage(`✅ Pipeline ejecutado: ${rows} filas procesadas`);
+      setMessage(`success:Pipeline executed: ${rows} rows processed (Forecast Horizon: T+${forecastHorizon})`);
       console.log("Run response:", data);
       console.log("IDs detectados:", uniqueIds);
+      console.log("Forecast Horizon:", forecastHorizon);
 
       // Emitir evento con el primer ID detectado
       if (uniqueIds.length > 0) {
@@ -84,7 +111,7 @@ export default function ControlHeader({ onIdsUpdate }) {
         if (onIdsUpdate) onIdsUpdate();
       }, 2000);
     } catch (err) {
-      setMessage(`❌ Error: ${err.message}`);
+      setMessage(`error:Pipeline error: ${err.message}`);
       console.error("Run error:", err);
     } finally {
       setRunning(false);
@@ -94,7 +121,7 @@ export default function ControlHeader({ onIdsUpdate }) {
   // Export Report (CSV with weights history)
   const handleExport = async () => {
     setExporting(true);
-    setMessage("⏳ Generando reporte...");
+    setMessage("Generating report...");
 
     try {
       // Obtener el ID actual desde el evento seriesSelected o usar "Other"
@@ -111,30 +138,35 @@ export default function ControlHeader({ onIdsUpdate }) {
       link.click();
       document.body.removeChild(link);
       
-      setMessage(`✅ Reporte exportado: weights_history_${currentId}.csv`);
+      setMessage(`success:Report exported: weights_history_${currentId}.csv`);
     } catch (err) {
-      setMessage(`❌ Error exportando: ${err.message}`);
+      setMessage(`error:Export error: ${err.message}`);
       console.error("Export error:", err);
     } finally {
       setExporting(false);
     }
   };
 
+  // Analyze Report with AI - Open modal for advanced analysis
+  const handleAnalyze = () => {
+    setShowAnalysisModal(true);
+  };
+
   // Reset System (limpiar pesos e historial)
   const handleReset = async () => {
     // Confirmar antes de resetear
     const confirmed = window.confirm(
-      "⚠️ Esto limpiará:\n" +
-      "- Todos los pesos acumulados\n" +
-      "- Historial de predicciones\n" +
-      "- Datos de deduplicación\n\n" +
-      "¿Estás seguro?"
+      "This will clear:\n" +
+      "- All accumulated weights\n" +
+      "- Prediction history\n" +
+      "- Deduplication data\n\n" +
+      "Are you sure?"
     );
     
     if (!confirmed) return;
     
     setResetting(true);
-    setMessage("⏳ Reseteando sistema...");
+    setMessage("Resetting system...");
 
     try {
       const res = await fetch(`${API_BASE}/api/reset_system`, {
@@ -147,13 +179,13 @@ export default function ControlHeader({ onIdsUpdate }) {
       console.log("Reset response:", data);
       
       if (data.status === "success") {
-        setMessage(`✅ Sistema reseteado. Listo para nuevo experimento.`);
+        setMessage(`success:System reset. Ready for new experiment.`);
       } else {
-        setMessage(`⚠️ Reseteo parcial. Revisa la consola.`);
+        setMessage(`warning:Partial reset. Check console for details.`);
         console.warn("Reset details:", data.details);
       }
     } catch (err) {
-      setMessage(`❌ Error reseteando: ${err.message}`);
+      setMessage(`error:Reset error: ${err.message}`);
       console.error("Reset error:", err);
     } finally {
       setResetting(false);
@@ -163,7 +195,139 @@ export default function ControlHeader({ onIdsUpdate }) {
   return (
     <div className="control-header">
       <div className="control-section">
-        <h2>🎯 Control Panel</h2>
+        <h2 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Target size={24} />
+          Control Panel
+        </h2>
+      </div>
+
+      {/* Forecast Horizon Selector */}
+      <div className="control-section" style={{ 
+        background: 'linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%)', 
+        padding: '16px', 
+        borderRadius: '8px',
+        border: '2px solid #FF7A00',
+        marginBottom: '16px'
+      }}>
+        <h3 style={{ 
+          margin: '0 0 12px 0', 
+          fontSize: '14px', 
+          fontWeight: '600',
+          color: '#FF7A00',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px'
+        }}>
+          <Target size={18} />
+          Forecast Horizon (T+M)
+        </h3>
+        
+        <div style={{ fontSize: '11px', color: '#999', marginBottom: '12px' }}>
+          Select how many steps ahead to predict (T+M where M = forecast horizon)
+        </div>
+
+        {/* Preset Buttons */}
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
+          {[1, 2, 3, 5, 10, 20, 30, 60].map(h => (
+            <button
+              key={h}
+              onClick={() => {
+                setForecastHorizon(h);
+                setCustomHorizon("");
+              }}
+              disabled={uploading || running}
+              className={forecastHorizon === h ? 'btn-active' : 'btn'}
+              style={{
+                padding: '6px 12px',
+                fontSize: '12px',
+                background: forecastHorizon === h ? '#FF7A00' : '#333',
+                border: forecastHorizon === h ? '2px solid #FF7A00' : '1px solid #555',
+                borderRadius: '4px',
+                color: '#fff',
+                cursor: (uploading || running) ? 'not-allowed' : 'pointer',
+                fontWeight: forecastHorizon === h ? 'bold' : 'normal',
+                opacity: (uploading || running) ? 0.5 : 1,
+                transition: 'all 0.2s'
+              }}
+            >
+              T+{h}
+            </button>
+          ))}
+          
+          {/* Custom Input */}
+          <input
+            type="number"
+            min="1"
+            max="200"
+            placeholder="Custom"
+            value={customHorizon}
+            onChange={(e) => {
+              const val = parseInt(e.target.value);
+              setCustomHorizon(e.target.value);
+              if (val > 0 && val <= 200) {
+                setForecastHorizon(val);
+              }
+            }}
+            disabled={uploading || running}
+            style={{
+              width: '80px',
+              padding: '6px 8px',
+              fontSize: '12px',
+              background: '#333',
+              border: '1px solid #555',
+              borderRadius: '4px',
+              color: '#fff',
+              textAlign: 'center'
+            }}
+          />
+        </div>
+
+        {/* Info Display */}
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'space-between',
+          padding: '8px 12px',
+          background: '#1a1a1a',
+          borderRadius: '4px',
+          border: '1px solid #333'
+        }}>
+          <div style={{ fontSize: '11px', color: '#888' }}>
+            Selected Horizon:
+          </div>
+          <div style={{ 
+            fontSize: '14px', 
+            fontWeight: 'bold', 
+            color: '#FF7A00',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}>
+            T+{forecastHorizon}
+            <span style={{ fontSize: '10px', color: '#666' }}>
+              ({forecastHorizon * 30} minutes ahead)
+            </span>
+          </div>
+        </div>
+
+        {/* Warning for large horizons */}
+        {forecastHorizon > 30 && (
+          <div style={{ 
+            marginTop: '8px',
+            padding: '6px 10px',
+            background: '#3a2a1a',
+            border: '1px solid #f59e0b',
+            borderRadius: '4px',
+            fontSize: '10px',
+            color: '#f59e0b',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}>
+            <AlertTriangle size={12} />
+            Large horizons may have lower prediction confidence
+          </div>
+        )}
       </div>
 
       <div className="control-section">
@@ -175,8 +339,8 @@ export default function ControlHeader({ onIdsUpdate }) {
             disabled={uploading || running}
             style={{ display: "none" }}
           />
-          <span className={`btn ${uploading ? "btn-disabled" : "btn-primary"}`}>
-            {uploading ? "⏳ Subiendo..." : "📁 Cargar CSV"}
+          <span className={`btn ${uploading ? "btn-disabled" : "btn-primary"}`} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {uploading ? <><Loader2 size={16} className="spin" /> Uploading...</> : <><Upload size={16} /> Upload CSV</>}
           </span>
         </label>
 
@@ -184,32 +348,315 @@ export default function ControlHeader({ onIdsUpdate }) {
           className={`btn ${running ? "btn-disabled" : "btn-success"}`}
           onClick={handleRun}
           disabled={uploading || running}
+          style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
         >
-          {running ? "⏳ Procesando..." : "🚀 Ejecutar Pipeline"}
+          {running ? <><Loader2 size={16} className="spin" /> Processing...</> : <><Play size={16} /> Execute Pipeline</>}
         </button>
 
         <button
           className={`btn ${exporting ? "btn-disabled" : "btn-info"}`}
           onClick={handleExport}
           disabled={uploading || running || exporting}
+          style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
         >
-          {exporting ? "⏳ Exportando..." : "📊 Exportar Reporte"}
+          {exporting ? <><Loader2 size={16} className="spin" /> Exporting...</> : <><Download size={16} /> Export Report</>}
+        </button>
+
+        <button
+          className={`btn ${analyzing ? "btn-disabled" : "btn-info"}`}
+          onClick={handleAnalyze}
+          disabled={uploading || running || analyzing}
+          style={{ background: analyzing ? "#666" : "#9333ea", display: 'flex', alignItems: 'center', gap: '8px' }}
+        >
+          {analyzing ? <><Loader2 size={16} className="spin" /> Analyzing...</> : <><Brain size={16} /> Analyze with AI</>}
         </button>
 
         <button
           className={`btn ${resetting ? "btn-disabled" : "btn-warning"}`}
           onClick={handleReset}
           disabled={uploading || running || exporting || resetting}
+          style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
         >
-          {resetting ? "⏳ Reseteando..." : "🔄 Reset Sistema"}
+          {resetting ? <><Loader2 size={16} className="spin" /> Resetting...</> : <><RefreshCw size={16} /> Reset System</>}
         </button>
       </div>
 
       {message && (
-        <div className={`control-message ${message.startsWith("❌") ? "error" : "success"}`}>
-          {message}
+        <div className={`control-message ${message.startsWith("error:") ? "error" : message.startsWith("success:") ? "success" : "warning"}`} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {message.startsWith("error:") && <XCircle size={16} />}
+          {message.startsWith("success:") && <CheckCircle size={16} />}
+          {message.startsWith("warning:") && <AlertTriangle size={16} />}
+          {message.replace(/^(error:|success:|warning:)/, '')}
         </div>
       )}
+
+      {/* AI Analysis Modal - Professional Design with Markdown */}
+      {analysisResult && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0, 0, 0, 0.92)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 10000,
+            padding: "20px",
+            backdropFilter: "blur(4px)",
+          }}
+          onClick={() => setAnalysisResult(null)}
+        >
+          <div
+            style={{
+              background: "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)",
+              border: "2px solid #3b82f6",
+              borderRadius: 16,
+              padding: "0",
+              maxWidth: "900px",
+              width: "100%",
+              maxHeight: "85vh",
+              overflow: "hidden",
+              color: "#fff",
+              boxShadow: "0 25px 80px rgba(59, 130, 246, 0.3), 0 0 0 1px rgba(59, 130, 246, 0.1)",
+              display: "flex",
+              flexDirection: "column",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div style={{ 
+              padding: "24px 32px",
+              borderBottom: "1px solid rgba(59, 130, 246, 0.3)",
+              background: "rgba(59, 130, 246, 0.08)",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center"
+            }}>
+              <div>
+                <h2 style={{ 
+                  margin: 0, 
+                  color: "#fff", 
+                  fontSize: 26,
+                  fontWeight: 700,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "12px"
+                }}>
+                  <Brain size={32} color="#60a5fa" />
+                  AI Analysis Report
+                </h2>
+                <p style={{ 
+                  margin: "8px 0 0 0", 
+                  color: "#60a5fa", 
+                  fontSize: 13,
+                  fontWeight: 400
+                }}>
+                  Automated analysis of ensemble performance
+                </p>
+              </div>
+              <button
+                onClick={() => setAnalysisResult(null)}
+                style={{
+                  background: "rgba(255, 255, 255, 0.1)",
+                  border: "1px solid rgba(255, 255, 255, 0.2)",
+                  color: "#fff",
+                  fontSize: 20,
+                  cursor: "pointer",
+                  padding: "8px 14px",
+                  borderRadius: 8,
+                  transition: "all 0.2s",
+                  display: "flex",
+                  alignItems: "center",
+                }}
+                onMouseOver={(e) => {
+                  e.target.style.background = "rgba(255, 255, 255, 0.2)";
+                }}
+                onMouseOut={(e) => {
+                  e.target.style.background = "rgba(255, 255, 255, 0.1)";
+                }}
+              >
+                <CloseIcon size={20} />
+              </button>
+            </div>
+
+            {/* Content with Markdown rendering */}
+            <div
+              style={{
+                flex: 1,
+                overflow: "auto",
+                padding: "32px",
+                background: "#0a0a0a",
+              }}
+            >
+              <div
+                className="markdown-content"
+                style={{
+                  lineHeight: 1.8,
+                  fontSize: 15,
+                  color: "#e5e5e5",
+                }}
+              >
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    h1: ({node, ...props}) => <h1 style={{ 
+                      color: '#fff', 
+                      fontSize: 28, 
+                      marginTop: 24, 
+                      marginBottom: 16,
+                      fontWeight: 700,
+                      borderBottom: "2px solid #3b82f6",
+                      paddingBottom: 8
+                    }} {...props} />,
+                    h2: ({node, ...props}) => <h2 style={{ 
+                      color: '#60a5fa', 
+                      fontSize: 22, 
+                      marginTop: 28, 
+                      marginBottom: 14,
+                      fontWeight: 600,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8
+                    }} {...props} />,
+                    h3: ({node, ...props}) => <h3 style={{ 
+                      color: '#93c5fd', 
+                      fontSize: 18, 
+                      marginTop: 20, 
+                      marginBottom: 10,
+                      fontWeight: 600
+                    }} {...props} />,
+                    p: ({node, ...props}) => <p style={{ 
+                      marginBottom: 16, 
+                      color: '#d4d4d4',
+                      lineHeight: 1.8
+                    }} {...props} />,
+                    ul: ({node, ...props}) => <ul style={{ 
+                      marginLeft: 24, 
+                      marginBottom: 16,
+                      listStyleType: 'disc',
+                      color: '#d4d4d4'
+                    }} {...props} />,
+                    ol: ({node, ...props}) => <ol style={{ 
+                      marginLeft: 24, 
+                      marginBottom: 16,
+                      color: '#d4d4d4'
+                    }} {...props} />,
+                    li: ({node, ...props}) => <li style={{ 
+                      marginBottom: 8,
+                      paddingLeft: 4,
+                      color: '#d4d4d4'
+                    }} {...props} />,
+                    strong: ({node, ...props}) => <strong style={{ 
+                      color: '#fff', 
+                      fontWeight: 700 
+                    }} {...props} />,
+                    em: ({node, ...props}) => <em style={{ 
+                      color: '#a78bfa', 
+                      fontStyle: 'italic' 
+                    }} {...props} />,
+                    code: ({node, inline, ...props}) => inline ? (
+                      <code style={{ 
+                        background: 'rgba(59, 130, 246, 0.15)', 
+                        padding: '2px 6px', 
+                        borderRadius: 4, 
+                        color: '#60a5fa',
+                        fontSize: 13,
+                        fontFamily: 'monospace'
+                      }} {...props} />
+                    ) : (
+                      <code style={{ 
+                        display: 'block', 
+                        background: 'rgba(0, 0, 0, 0.5)', 
+                        padding: 16, 
+                        borderRadius: 8, 
+                        marginBottom: 16,
+                        color: '#60a5fa',
+                        fontSize: 13,
+                        fontFamily: 'monospace',
+                        border: '1px solid rgba(59, 130, 246, 0.3)',
+                        overflowX: 'auto'
+                      }} {...props} />
+                    ),
+                    blockquote: ({node, ...props}) => <blockquote style={{
+                      borderLeft: '4px solid #3b82f6',
+                      paddingLeft: 16,
+                      marginLeft: 0,
+                      marginBottom: 16,
+                      color: '#60a5fa',
+                      fontStyle: 'italic',
+                      background: 'rgba(59, 130, 246, 0.08)',
+                      padding: '12px 16px',
+                      borderRadius: 4
+                    }} {...props} />,
+                  }}
+                >
+                  {analysisResult}
+                </ReactMarkdown>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div style={{ 
+              padding: "20px 32px",
+              borderTop: "1px solid rgba(59, 130, 246, 0.3)",
+              background: "rgba(59, 130, 246, 0.05)",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center"
+            }}>
+              <p style={{ 
+                margin: 0, 
+                color: "#888", 
+                fontSize: 12,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}>
+                <Lightbulb size={14} />
+                This analysis was generated using AI and should be validated by domain experts.
+              </p>
+              <button
+                onClick={() => setAnalysisResult(null)}
+                style={{
+                  background: "linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)",
+                  border: "none",
+                  color: "#fff",
+                  padding: "12px 28px",
+                  borderRadius: 8,
+                  cursor: "pointer",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  boxShadow: "0 4px 12px rgba(59, 130, 246, 0.4)",
+                  transition: "all 0.2s",
+                }}
+                onMouseOver={(e) => {
+                  e.target.style.transform = "translateY(-2px)";
+                  e.target.style.boxShadow = "0 6px 16px rgba(59, 130, 246, 0.5)";
+                }}
+                onMouseOut={(e) => {
+                  e.target.style.transform = "translateY(0)";
+                  e.target.style.boxShadow = "0 4px 12px rgba(59, 130, 246, 0.4)";
+                }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Advanced Analysis Modal */}
+      <AnalysisModal
+        isOpen={showAnalysisModal}
+        onClose={() => setShowAnalysisModal(false)}
+        currentId={window.localStorage.getItem('currentSeriesId') || "Other"}
+        selectorData={analyticsData.selectorData || []}
+        viewMode={analyticsData.viewMode || "full"}
+        demoPoints={analyticsData.demoPoints || []}
+      />
     </div>
   );
 }

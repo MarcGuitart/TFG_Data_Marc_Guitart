@@ -145,6 +145,8 @@ services:
     networks: [ tfg_net ]
     volumes:
       - ../data:/app/data
+    env_file:
+      - .env
     environment:
       - INFLUX_URL=http://influxdb:8086
       - INFLUX_TOKEN=admin_token

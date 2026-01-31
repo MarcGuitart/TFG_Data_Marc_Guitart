@@ -4,7 +4,7 @@ from typing import List, Dict, Any
 from decimal import Decimal
 from datetime import datetime, timedelta
 from fastapi.responses import JSONResponse, StreamingResponse
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Query, HTTPException, Body
 from influxdb_client import InfluxDBClient
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -42,6 +42,9 @@ router_metrics = APIRouter(prefix="/api/metrics", tags=["metrics"])
 # Configura el logger
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger("metrics_debug")
+
+# Global state: store the last forecast horizon selected
+_last_forecast_horizon = {}  # {"forecast_horizon": 1, "timestamp": datetime}
 
 
 def _sanitize_numbers(o):
@@ -326,22 +329,29 @@ def get_series(
     hours: int = Query(24, ge=1, le=24*365)
 ):
     """
-    Devuelve la serie observada (var), la predicha híbrida (prediction),
-    las predicciones por modelo, el modelo elegido y errores en cada instante (AP2).
+    Returns the observed series (var), the hybrid prediction (prediction),
+    the predictions per model, the chosen model, and errors at each instant.
+    
+    Now includes temporal semantics:
+    - t_decision: moment when prediction was made (t)
+    - horizon: number of slots ahead being predicted (m)
     """
     start = f"-{hours}h"
+    
+    # Get the horizon from the last execution (default to 1)
+    global _last_forecast_horizon
+    current_horizon = _last_forecast_horizon.get("forecast_horizon", 1)
 
     try:
         var_series = _query_field("telemetry", id, "var", start)
         pred_series = _query_field("telemetry", id, "prediction", start)
         yhat_by_model = _query_models_yhat(id, start)
-        chosen_series = _query_chosen_model(id, start)  # AP2: modelo elegido
-        weights_by_model = _query_weights(id, start)    # AP3: pesos por modelo
-        chosen_errors = _query_chosen_errors(id, start) # AP2: errores del modelo elegido
+        chosen_series = _query_chosen_model(id, start)  
+        weights_by_model = _query_weights(id, start)    
+        chosen_errors = _query_chosen_errors(id, start) 
         logger.info(f"[/api/series] id={id} var_series={len(var_series)} pred_series={len(pred_series)} yhat_by_model keys={list(yhat_by_model.keys())} chosen={len(chosen_series)} errors={len(chosen_errors)} weights={list(weights_by_model.keys())}")
     except Exception as e:
         logger.exception("Failed to query series for /api/series")
-        # Retorna datos vacíos en lugar de error, para que el frontend pueda manejarlo
         return JSONResponse(content={
             "id": id,
             "observed": [],
@@ -465,21 +475,36 @@ def get_series(
         # AP1 FIX: y_adaptive DEBE ser exactamente el valor del modelo elegido, no la predicción híbrida
         y_adaptive = b["models"].get(chosen) if chosen and chosen in b["models"] else c_val
         
+        # Calcular error del ensemble (prediction final ponderada)
+        ensemble_error_abs = None
+        ensemble_error_rel = None
+        ensemble_error_rel_mean = None  # MAPE para este punto
+        if a_val is not None and c_val is not None:
+            ensemble_error_abs = abs(c_val - a_val)
+            ensemble_error_rel = (ensemble_error_abs / abs(a_val)) * 100 if a_val != 0 else 0
+            ensemble_error_rel_mean = ensemble_error_rel  # Para este punto, es lo mismo
+        
         point = {
             "t": int(t.timestamp() * 1000),  # epoch ms
             "timestamp": t.isoformat(),      # ISO timestamp para LivePredictionChart
+            "t_decision": t.isoformat(),     # Momento de decisión (t) - para visualización
+            "horizon": current_horizon,      # Horizonte de predicción (m slots)
             "var": a_val,                    # valor observado
             "yhat": y_adaptive,              # AP1: EXACTAMENTE el modelo elegido
             "prediction": c_val,             # predicción híbrida (legacy)
             "y_adaptive": y_adaptive,        # AP1: campo explícito para verificación
             "chosen_model": chosen,          # AP2: modelo elegido
-            "chosen_error_abs": err_info.get("error_abs"),  # AP2: error absoluto
-            "chosen_error_rel": err_info.get("error_rel"),  # AP2: error relativo
-            "hyper_models": {                # Modelos individuales
+            "chosen_error_abs": err_info.get("error_abs"),  # AP2: error absoluto del chosen
+            "chosen_error_rel": err_info.get("error_rel"),  # AP2: error relativo del chosen
+            "error_abs": ensemble_error_abs,  # Error absoluto del ENSEMBLE
+            "error_rel": ensemble_error_rel,  # Error relativo del ENSEMBLE
+            "error_rel_mean": ensemble_error_rel_mean,  # MAPE del ENSEMBLE (para ConfidenceEvolutionChart)
+            "hyper_models": {                # Modelos individuales (5 modelos activos)
                 "kalman": b["models"].get("kalman"),
                 "linear": b["models"].get("linear"),
                 "poly": b["models"].get("poly"),
                 "alphabeta": b["models"].get("alphabeta"),
+                "naive": b["models"].get("naive"),
             }
         }
         for model, yhat in b["models"].items():
@@ -488,6 +513,7 @@ def get_series(
 
     payload = {
         "id": id,
+        "horizon": current_horizon,       # Horizonte de predicción (m slots)
         "observed": observed,
         "predicted": predicted,       # híbrida
         "models": models_payload,     # por modelo
@@ -563,6 +589,196 @@ def _align_by_time(a: List[Dict[str, Any]], b: List[Dict[str, Any]], tol_seconds
             ib += 1
 
     return res
+
+
+# ============================================================================
+# MULTI-HORIZON FORECAST ENDPOINT
+# ============================================================================
+@app.get("/api/forecast_multi_horizon")
+def get_multi_horizon_forecast(
+    id: str = Query(..., description="series id"),
+    hours: int = Query(24, ge=1, le=24*365, description="lookback window")
+):
+    """
+    Get the multi-horizon forecast for the LAST EXECUTED PIPELINE.
+    
+    This endpoint returns forecasts ONLY for the horizon that was selected
+    when the pipeline was executed (stored in _last_forecast_horizon).
+    
+    If no pipeline has been executed, or forecast_horizon wasn't set,
+    defaults to showing T+1.
+    
+    Returns:
+        JSON with:
+        - selected_horizon: the T+M that was executed
+        - predictions: array of {time_t, time_t_plus_h, ground_truth_t, ground_truth_t_plus_h, prediction_t, confidence, error_rel, error_abs}
+        - avg_confidence: average confidence for this horizon
+        - avg_error_rel: average relative error
+        - total_points: number of prediction points
+    """
+    global _last_forecast_horizon
+    
+    # Get the horizon from the last execution, default to 1
+    selected_horizon = _last_forecast_horizon.get("forecast_horizon", 1)
+    last_execution_time = _last_forecast_horizon.get("timestamp")
+    
+    logger.info(f"[MULTI_HORIZON] === Starting forecast for id={id}, horizon=T+{selected_horizon}, hours={hours} ===")
+    logger.info(f"[MULTI_HORIZON] Last execution: {last_execution_time}")
+    
+    try:
+        # 1) Get series data from the /api/series endpoint
+        logger.info(f"[MULTI_HORIZON] Step 1: Querying series data...")
+        
+        # Call the series endpoint directly
+        import httpx
+        try:
+            async_client = httpx.Client(timeout=30.0)
+            res = async_client.get(f"http://localhost:8081/api/series?id={id}&hours={hours}")
+            res.raise_for_status()
+            series_data = res.json()
+            async_client.close()
+        except Exception as e:
+            logger.error(f"[MULTI_HORIZON] Could not fetch series data: {e}")
+            return JSONResponse(content={
+                "id": id,
+                "selected_horizon": selected_horizon,
+                "predictions": [],
+                "error": f"Could not fetch series data: {str(e)}"
+            })
+        
+        # Extract points: each point has {"timestamp", "var" (ground truth), "prediction" or "y_adaptive"}
+        points = series_data.get("points", [])
+        if not points:
+            logger.warning(f"[MULTI_HORIZON] No points found for series {id}")
+            return JSONResponse(content={
+                "id": id,
+                "selected_horizon": selected_horizon,
+                "predictions": [],
+                "error": "No data points available for this series"
+            })
+        
+        logger.info(f"[MULTI_HORIZON] Step 1 complete: {len(points)} points fetched")
+        
+        # 2) Calculate forecast ONLY for the selected horizon
+        logger.info(f"[MULTI_HORIZON] Step 2: Calculating forecast for horizon T+{selected_horizon}...")
+        
+        # SLOT_MINUTES defines the timestep (typically 30 minutes)
+        SLOT_MINUTES = 30
+        
+        h = selected_horizon
+        predictions = []
+        confidence_scores = []
+        errors_rel = []
+        
+        # For each point, calculate what error would have been at horizon h
+        for i in range(len(points) - h):  # Only consider points where we have ground truth at T+h
+            current_point = points[i]
+            target_point = points[i + h]
+            
+            # Current values
+            time_current = current_point.get("timestamp")
+            var_current = current_point.get("var")  # Ground truth at T
+            pred_current = current_point.get("prediction") or current_point.get("y_adaptive")  # Ensemble prediction at T
+            
+            # Target values (at T+h)
+            time_target = target_point.get("timestamp")
+            var_target = target_point.get("var")  # Ground truth at T+h
+            pred_target = pred_current  # We use the prediction made at T for T+h (as proxy)
+            logger.info(f"[MULTI_HORIZON] === Processing horizon T+{h} ===")
+            
+            horizon_predictions = []
+            confidence_scores = []
+            errors_rel = []
+            
+            # For each point, calculate what error would have been at horizon h
+            for i in range(len(points) - h):  # Only consider points where we have ground truth at T+h
+                current_point = points[i]
+                target_point = points[i + h]
+                
+                # Current values
+                time_current = current_point.get("timestamp")
+                var_current = current_point.get("var")  # Ground truth at T
+                pred_current = current_point.get("prediction") or current_point.get("y_adaptive")  # Ensemble prediction at T
+                
+                # Target values (at T+h)
+                time_target = target_point.get("timestamp")
+                var_target = target_point.get("var")  # Ground truth at T+h
+                pred_target = pred_current  # We use the prediction made at T for T+h (as proxy)
+                
+                if var_target is None or pred_target is None:
+                    continue
+            
+            if var_target is None or pred_target is None:
+                continue
+            
+            # Calculate error metrics
+            error_abs = abs(pred_target - var_target)
+            error_rel = 0
+            confidence = 100
+            
+            if var_target != 0:
+                error_rel = (error_abs / abs(var_target)) * 100
+                confidence = max(0, min(100, 100 - error_rel))  # Bounded 0-100
+            
+            errors_rel.append(error_rel)
+            confidence_scores.append(confidence)
+            
+            # Record prediction
+            predictions.append({
+                "index": i,
+                "time_t": time_current,
+                "time_t_plus_h": time_target,
+                "ground_truth_t": var_current,
+                "ground_truth_t_plus_h": var_target,
+                "prediction_t": pred_current,
+                "error_abs": error_abs,
+                "error_rel": error_rel,
+                "confidence": confidence
+            })
+            
+            # Log first 3 points for verification
+            if i < 3:
+                var_str = f"{var_current:.4f}" if var_current is not None else "None"
+                pred_str = f"{pred_current:.4f}" if pred_current is not None else "None"
+                logger.info(f"[MULTI_HORIZON_VERIFY] H=T+{h}, Point index={i}:")
+                logger.info(f"  T: {time_current}, var={var_str}, pred={pred_str}")
+                logger.info(f"  T+{h}: {time_target}, var={var_target:.4f}")
+                logger.info(f"  Error: abs={error_abs:.4f}, rel={error_rel:.2f}%, conf={confidence:.2f}%")
+        
+        # Calculate horizon statistics
+        avg_confidence = None
+        avg_error_rel = None
+        
+        if confidence_scores:
+            avg_confidence = sum(confidence_scores) / len(confidence_scores)
+        
+        if errors_rel:
+            avg_error_rel = sum(errors_rel) / len(errors_rel)
+        
+        conf_str = f"{avg_confidence:.2f}" if avg_confidence is not None else "N/A"
+        err_str = f"{avg_error_rel:.2f}" if avg_error_rel is not None else "N/A"
+        logger.info(f"[MULTI_HORIZON] Horizon T+{h} complete: {len(predictions)} points, "
+                   f"avg_confidence={conf_str}%, avg_error={err_str}%")
+        
+        logger.info(f"[MULTI_HORIZON] === Forecast complete for horizon T+{selected_horizon} ===")
+        
+        return JSONResponse(content=_sanitize_numbers({
+            "id": id,
+            "selected_horizon": selected_horizon,
+            "predictions": predictions,
+            "avg_confidence": avg_confidence,
+            "avg_error_rel": avg_error_rel,
+            "total_points": len(predictions),
+            "lookback_hours": hours,
+            "slot_minutes": SLOT_MINUTES
+        }))
+        
+    except Exception as e:
+        logger.exception(f"[MULTI_HORIZON] ERROR calculating forecast for horizon T+{selected_horizon}: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e), "id": id, "selected_horizon": selected_horizon}
+        )
 
 
 
@@ -863,7 +1079,7 @@ AGENT_URL       = os.getenv("AGENT_URL", "http://agent:8090")  # AP3: URL del ag
 
 @app.get("/api/agent/weights/{unit_id}")
 def proxy_agent_weights(unit_id: str):
-    """AP3: Obtener pesos actuales de un HyperModel via agent"""
+    """Obtain current weights of a HyperModel via agent"""
     try:
         r = httpx.get(f"{AGENT_URL}/api/weights/{unit_id}", timeout=10.0)
         r.raise_for_status()
@@ -875,7 +1091,7 @@ def proxy_agent_weights(unit_id: str):
 
 @app.get("/api/agent/history/{unit_id}")
 def proxy_agent_history(unit_id: str, last_n: int = 100):
-    """AP3: Obtener historial de pesos para análisis"""
+    """Obtain history of weights for analysis"""
     try:
         r = httpx.get(f"{AGENT_URL}/api/history/{unit_id}", params={"last_n": last_n}, timeout=10.0)
         r.raise_for_status()
@@ -887,7 +1103,7 @@ def proxy_agent_history(unit_id: str, last_n: int = 100):
 
 @app.get("/api/agent/stats/{unit_id}")
 def proxy_agent_stats(unit_id: str):
-    """AP3: Estadísticas por modelo para la memoria del TFG"""
+    """Obtain statistics by model for TFG memory"""
     try:
         r = httpx.get(f"{AGENT_URL}/api/stats/{unit_id}", timeout=10.0)
         r.raise_for_status()
@@ -899,13 +1115,8 @@ def proxy_agent_stats(unit_id: str):
 
 @app.get("/api/download_weights/{unit_id}")
 def download_weights_csv(unit_id: str):
-    """
-    Descarga el historial de pesos como CSV.
-    1. Pide al agente el historial completo
-    2. Convierte a CSV y devuelve como archivo descargable
-    """
     try:
-        # Obtener historial del agente
+        # Obtain history of the agent
         r = httpx.get(f"{AGENT_URL}/api/history/{unit_id}", params={"last_n": 999999}, timeout=30.0)
         r.raise_for_status()
         data = r.json()
@@ -914,14 +1125,13 @@ def download_weights_csv(unit_id: str):
         if not history:
             raise HTTPException(status_code=404, detail=f"No history for {unit_id}")
         
-        # Convertir a CSV
+        # Convert a CSV in memory
         output = StringIO()
         fieldnames = list(history[0].keys())
         writer = csv.DictWriter(output, fieldnames=fieldnames)
         writer.writeheader()
         
         for entry in history:
-            # Redondear floats para legibilidad
             row = {}
             for k, v in entry.items():
                 if isinstance(v, float):
@@ -930,12 +1140,18 @@ def download_weights_csv(unit_id: str):
                     row[k] = v
             writer.writerow(row)
         
-        # Devolver como archivo descargable
-        output.seek(0)
+        csv_content = output.getvalue()
+
+        # Save in /app/data for AI analysis
+        csv_path = f"/app/data/weights_history_{unit_id}.csv"
+        with open(csv_path, 'w') as f:
+            f.write(csv_content)
+
+        # Return as downloadable file
         filename = f"weights_history_{unit_id}.csv"
         
         return StreamingResponse(
-            iter([output.getvalue()]),
+            iter([csv_content]),
             media_type="text/csv",
             headers={"Content-Disposition": f"attachment; filename={filename}"}
         )
@@ -960,17 +1176,26 @@ def proxy_agent_export_csv(unit_id: str):
 # ============================================================================
 
 @app.post("/api/run_window")
-def run_window(source: str = Query("uploaded.csv"), speed_ms: int = Query(0)):
+def run_window(source: str = Query("uploaded.csv"), speed_ms: int = Query(0), forecast_horizon: int = Query(1, ge=1, le=200)):
     """
     Dispara el window_loader con un CSV específico.
     
     Parámetros (query):
       - source: nombre del archivo CSV en /app/data (default: uploaded.csv)
       - speed_ms: delay en ms entre mensajes (default: 0 = sin delay)
+      - forecast_horizon: horizonte de predicción seleccionado en frontend (T+N, default: 1)
     
-    Uso: POST /api/run_window?source=archivo.csv&speed_ms=100
+    Uso: POST /api/run_window?source=archivo.csv&speed_ms=100&forecast_horizon=10
     """
     import time
+    global _last_forecast_horizon
+    
+    logger.info(f"[orchestrator] run_window called: source={source}, speed_ms={speed_ms}, forecast_horizon={forecast_horizon}")
+    
+    # Save the forecast horizon for later use in multi-horizon endpoint
+    _last_forecast_horizon["forecast_horizon"] = forecast_horizon
+    _last_forecast_horizon["timestamp"] = datetime.now()
+    logger.info(f"[orchestrator] Saved forecast_horizon={forecast_horizon} for this execution")
     
     # 1) Reset collector
     try:
@@ -983,19 +1208,20 @@ def run_window(source: str = Query("uploaded.csv"), speed_ms: int = Query(0)):
     # Pequeño delay para que el reset se propague
     time.sleep(1)
 
-    # 2) Dispara loader con el CSV especificado
+    # 2) Dispara loader con el CSV especificado y el horizonte
     payload = {
         "source": source,
-        "speed_ms": speed_ms
+        "speed_ms": speed_ms,
+        "forecast_horizon": forecast_horizon  # Pass horizon to loader
     }
     
     try:
-        print(f"[orchestrator] Triggering loader with source={source}, speed_ms={speed_ms}")
+        print(f"[orchestrator] Triggering loader with source={source}, speed_ms={speed_ms}, forecast_horizon={forecast_horizon}")
         r_trig = httpx.post(LOADER_URL, json=payload, timeout=120.0)
         r_trig.raise_for_status()
         data = r_trig.json() if r_trig.text else {}
         print(f"[orchestrator] Loader response: {data}")
-        return {"status": "success", "loader_response": data, "source": source}
+        return {"status": "success", "loader_response": data, "source": source, "forecast_horizon": forecast_horizon}
     except httpx.HTTPStatusError as e:
         print(f"[orchestrator] Loader HTTP error {e.response.status_code}: {e.response.text}")
         raise HTTPException(status_code=500, detail=f"loader trigger failed: {e.response.text}")
@@ -1004,13 +1230,27 @@ def run_window(source: str = Query("uploaded.csv"), speed_ms: int = Query(0)):
         raise HTTPException(status_code=500, detail=f"loader trigger failed: {str(e)}")
 
 
+@app.get("/api/forecast_horizon")
+def get_forecast_horizon():
+    """
+    Retorna el horizonte de predicción guardado globalmente de la última ejecución.
+    """
+    global _last_forecast_horizon
+    return {
+        "forecast_horizon": _last_forecast_horizon.get("forecast_horizon", 1),
+        "timestamp": _last_forecast_horizon.get("timestamp")
+    }
+
+
+
+
 @app.post("/api/reset_system")
 def reset_system():
     """
-    Resetea completamente el sistema para empezar un nuevo experimento desde cero:
-    1. Limpia deduplicación del collector
+    Completely resets the system to start a new experiment from scratch:
+    3. Optionally clears InfluxDB (commented for safety)y)
     2. Resetea todos los HyperModels del agent (pesos e historial)
-    3. Opcionalmente limpia InfluxDB (comentado por seguridad)
+    Useful before running a new pipeline to avoid accumulation of
     
     Útil antes de ejecutar un nuevo pipeline para evitar acumulación de datos previos.
     """
@@ -1020,7 +1260,7 @@ def reset_system():
         "influxdb": {"status": "skipped", "message": "Manual cleanup required"}
     }
     
-    # 1. Reset Collector (deduplicación)
+    # 1. Reset Collector
     try:
         r_collector = httpx.post(COLLECTOR_RESET, timeout=10.0)
         r_collector.raise_for_status()
@@ -1028,7 +1268,7 @@ def reset_system():
     except Exception as e:
         results["collector"] = {"status": "error", "message": str(e)}
     
-    # 2. Reset Agent (todos los HyperModels)
+    # 2. Reset Agent
     try:
         r_agent = httpx.post(f"{AGENT_URL}/api/reset_all", timeout=10.0)
         r_agent.raise_for_status()
@@ -1036,36 +1276,62 @@ def reset_system():
     except Exception as e:
         results["agent"] = {"status": "error", "message": str(e)}
     
-    # 3. InfluxDB cleanup (OPCIONAL - comentado por seguridad)
-    # Si quieres limpiar InfluxDB, descomenta esto:
-    # try:
-    #     from influxdb_client import InfluxDBClient
-    #     from influxdb_client.client.delete_api import DeleteApi
-    #     
-    #     client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
-    #     delete_api = client.delete_api()
-    #     
-    #     # Borrar últimos 7 días de telemetry
-    #     start = "1970-01-01T00:00:00Z"
-    #     stop = (datetime.utcnow() + timedelta(days=1)).isoformat() + "Z"
-    #     delete_api.delete(start, stop, '_measurement="telemetry"', 
-    #                       bucket=INFLUX_BUCKET, org=INFLUX_ORG)
-    #     
-    #     results["influxdb"] = {"status": "success", "message": "Telemetry data deleted"}
-    # except Exception as e:
-    #     results["influxdb"] = {"status": "error", "message": str(e)}
+    # 3. InfluxDB cleanup - Delete all previous data
+    try:
+        from influxdb_client import InfluxDBClient
+        from influxdb_client.client.delete_api import DeleteApi
+        
+        client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
+        delete_api = client.delete_api()
+        
+        # Delete ALL data
+        start = "1970-01-01T00:00:00Z"
+        stop = (datetime.utcnow() + timedelta(days=1)).isoformat() + "Z"
+
+        
+        # List of ALL measurements that are written
+        measurements = [
+            "telemetry",           # predictions and real values
+            "telemetry_models",    # predictions by individual model
+            "weights",             # ensemble weights
+            "chosen_model",        # chosen model
+            "chosen_error",        # errors of the chosen model
+            "model_errors",        # errors by model
+            "model_rankings",      # model rankings
+            "model_rewards",       # model rewards
+            "weight_decisions"     # weight change decisions
+        ]
+        
+        deleted_count = 0
+        for measurement in measurements:
+            try:
+                delete_api.delete(start, stop, f'_measurement="{measurement}"', 
+                                  bucket=INFLUX_BUCKET, org=INFLUX_ORG)
+                deleted_count += 1
+            except Exception as e:
+                logger.warning(f"Could not delete {measurement}: {e}")
+        
+        client.close()
+        results["influxdb"] = {
+            "status": "success", 
+            "message": f"Deleted {deleted_count}/{len(measurements)} measurements from InfluxDB",
+            "measurements_deleted": deleted_count
+        }
+    except Exception as e:
+        results["influxdb"] = {"status": "error", "message": str(e)}
     
     # Determinar status global
     all_success = (
         results["collector"]["status"] == "success" and
-        results["agent"]["status"] == "success"
+        results["agent"]["status"] == "success" and
+        results["influxdb"]["status"] == "success"
     )
     
     return {
         "status": "success" if all_success else "partial",
         "timestamp": datetime.utcnow().isoformat(),
         "details": results,
-        "message": "Sistema reseteado. Listo para nuevo experimento." if all_success else "Reseteo parcial. Revisa detalles."
+        "message": "Complete system reset." if all_success else "Partial reset. Check details."
     }
 
 
@@ -1073,18 +1339,17 @@ def reset_system():
 UPLOAD_DIR = "/app/data"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-
 @app.post("/api/upload_csv")
 async def upload_csv(file: UploadFile = File(...)):
     if not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Only CSV files are allowed")
 
-    dest_path = os.path.join(UPLOAD_DIR, "uploaded.csv")  # <-- nombre fijo
+    dest_path = os.path.join(UPLOAD_DIR, "uploaded.csv") 
     contents = await file.read()
     with open(dest_path, "wb") as f:
         f.write(contents)
 
-    # contar filas de forma barata
+    # counts rows
     try:
         text = contents.decode("utf-8", errors="ignore").splitlines()
         reader = csv.DictReader(text)
@@ -1216,4 +1481,455 @@ def delete_scenario_endpoint(scenario_name: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error deleting scenario: {e}")
+
+
+@app.post("/api/analyze_report/{id}")
+async def analyze_report(id: str):
+    """
+    Analiza el reporte exportado usando IA (Groq) con acceso completo al CSV
+    para proporcionar un análisis profundo y accionable.
+    """
+    try:
+        from groq import Groq
+        import csv
+        import os
+
+        # Configure Groq API
+        api_key = os.getenv("GROQ_API_KEY")
+        
+        if not api_key:
+            raise HTTPException(
+                status_code=500, 
+                detail="GROQ_API_KEY not configured. Get free API key at: https://console.groq.com/keys"
+            )
+
+        # Reads the complete exported CSV
+        csv_path = f"/app/data/weights_history_{id}.csv"
+        
+        if not os.path.exists(csv_path):
+            raise HTTPException(
+                status_code=404,
+                detail=f"No export found for series '{id}'. Please export the report first."
+            )
+
+        # Reads the complete exported CSV and extracts key information
+        csv_data = []
+        with open(csv_path, 'r') as f:
+            reader = csv.DictReader(f)
+            csv_data = list(reader)
+        
+        if not csv_data:
+            raise HTTPException(status_code=404, detail="CSV file is empty")
+
+        # Analyze data structure
+        total_points = len(csv_data)
+        first_row = csv_data[0]
+        last_row = csv_data[-1]
+
+        # Extract columns de modelos (weight_*)
+        model_names = [col.replace('weight_', '') for col in first_row.keys() if col.startswith('weight_')]
+        
+        # Compute final statistics for each model
+        model_stats = {}
+        for model in model_names:
+            weights = []
+            predictions = []
+            
+            for row in csv_data:
+                try:
+                    w = float(row.get(f'weight_{model}', 0))
+                    weights.append(w)
+                    
+                    pred = float(row.get(f'pred_{model}', 0))
+                    predictions.append(pred)
+                except (ValueError, TypeError):
+                    continue
+            
+            if weights:
+                model_stats[model] = {
+                    "weight_initial": round(weights[0], 4),
+                    "weight_final": round(weights[-1], 4),
+                    "weight_mean": round(sum(weights) / len(weights), 4),
+                    "weight_max": round(max(weights), 4),
+                    "weight_min": round(min(weights), 4),
+                    "prediction_final": round(predictions[-1], 4) if predictions else 0
+                }
+        
+        # Obtener valores reales y predicción ensemble
+        real_values = [float(row.get('var', 0)) for row in csv_data if row.get('var')]
+        ensemble_predictions = [float(row.get('prediction', 0)) for row in csv_data if row.get('prediction')]
+        
+        # Calcular error del ensemble (MAE y MAPE)
+        ensemble_errors = []
+        ensemble_ape = []
+        for i in range(min(len(real_values), len(ensemble_predictions))):
+            err = abs(ensemble_predictions[i] - real_values[i])
+            ensemble_errors.append(err)
+            
+            # MAPE
+            if real_values[i] != 0:
+                ape = abs(err / real_values[i])
+                ensemble_ape.append(ape)
+        
+        ensemble_mae = sum(ensemble_errors) / len(ensemble_errors) if ensemble_errors else 0
+        ensemble_mape = (sum(ensemble_ape) / len(ensemble_ape) * 100) if ensemble_ape else 0
+        
+        # Calcular MAE y MAPE por modelo
+        for model in model_names:
+            preds = [float(row.get(f'pred_{model}', 0)) for row in csv_data]
+            reals = [float(row.get('var', 0)) for row in csv_data]
+            
+            mae_list = []
+            mape_list = []
+            for i in range(min(len(preds), len(reals))):
+                err = abs(preds[i] - reals[i])
+                mae_list.append(err)
+                if reals[i] != 0:
+                    mape_list.append(abs(err / reals[i]))
+            
+            if model in model_stats:
+                model_stats[model]['mae'] = round(sum(mae_list) / len(mae_list), 4) if mae_list else 0
+                model_stats[model]['mape'] = round((sum(mape_list) / len(mape_list) * 100), 2) if mape_list else 0
+        
+        # Identificar tendencias de pesos
+        weight_evolution = {}
+        for model in model_names:
+            weights = [float(row.get(f'weight_{model}', 0)) for row in csv_data]
+            if len(weights) > 10:
+                # Comparar primer 25% vs último 25%
+                first_quarter = sum(weights[:len(weights)//4]) / (len(weights)//4)
+                last_quarter = sum(weights[-len(weights)//4:]) / (len(weights)//4)
+                trend = "Increasing" if last_quarter > first_quarter * 1.2 else "Decreasing" if last_quarter < first_quarter * 0.8 else "Stable"
+                weight_evolution[model] = trend
+        
+        # Construir prompt detallado con TODOS los datos
+        csv_sample = "\n".join([
+            f"Point {i+1}: real={row.get('var', 'N/A')}, ensemble_pred={row.get('prediction', 'N/A')}, chosen_model={row.get('chosen_model', 'N/A')}"
+            for i, row in enumerate(csv_data[:5])  # Primeros 5 puntos como muestra
+        ])
+        
+        csv_sample += "\n...\n"
+        csv_sample += "\n".join([
+            f"Point {len(csv_data)-4+i}: real={row.get('var', 'N/A')}, ensemble_pred={row.get('prediction', 'N/A')}, chosen_model={row.get('chosen_model', 'N/A')}"
+            for i, row in enumerate(csv_data[-5:])  # Últimos 5 puntos
+        ])
+        
+        prompt = f"""You are an expert analyst in adaptive prediction systems and ensemble learning.
+
+SYSTEM CONTEXT:
+This is a SOFT ensemble prediction system combining 5 different models:
+- **linear**: Simple linear regression
+- **poly**: Polynomial regression (degree 2)
+- **alphabeta**: Alpha-Beta filter (trend tracking)
+- **kalman**: Kalman filter (Bayesian optimal)
+- **naive**: Naive model (last observed value / persistence)
+
+The system adjusts model WEIGHTS in real-time based on recent performance.
+Final prediction: prediction = Σ(weight_i × pred_i)
+
+EXPERIMENT DATA:
+Total processed points: {total_points}
+Ensemble MAE: {round(ensemble_mae, 4)}
+Ensemble MAPE: {round(ensemble_mape, 2)}%
+Overall Accuracy: {round(100 - ensemble_mape, 2)}%
+
+MODEL STATISTICS:
+{chr(10).join([f"**{model}**:" + chr(10) + 
+               f"  - MAE: {stats.get('mae', 'N/A')}" + chr(10) +
+               f"  - MAPE: {stats.get('mape', 'N/A')}%" + chr(10) +
+               f"  - Initial weight: {stats['weight_initial']}" + chr(10) +
+               f"  - Final weight: {stats['weight_final']}" + chr(10) +
+               f"  - Average weight: {stats['weight_mean']}" + chr(10) +
+               f"  - Weight range: [{stats['weight_min']}, {stats['weight_max']}]" + chr(10) +
+               f"  - Trend: {weight_evolution.get(model, 'N/A')}" + chr(10) +
+               f"  - Final prediction: {stats['prediction_final']}"
+               for model, stats in sorted(model_stats.items(), key=lambda x: x[1]['weight_final'], reverse=True)])}
+
+DATA SAMPLE (first and last points):
+{csv_sample}
+
+REQUIRED ANALYSIS:
+Provide a DEEP and INSIGHTFUL analysis in Markdown format with the following sections:
+
+## Executive Summary
+Concise description of overall system performance (2-3 lines) with accuracy metrics.
+
+## Model Performance Analysis
+
+### Top Performers
+Identify the 2-3 best models and explain:
+- Why they have high weights
+- What time series characteristics favor these models
+- When they are most effective
+- Specific MAE and MAPE values
+
+### Weak Models
+Identify underperforming models and explain:
+- Why they have low weights
+- What patterns they CANNOT capture effectively
+- Their contribution to ensemble diversity
+
+## Weight Evolution
+
+Analyze how weights changed during the experiment:
+- Which models gained confidence over time?
+- Which models lost confidence?
+- What does this indicate about the underlying data patterns?
+- Stability analysis (convergence vs oscillation)
+
+## Technical Insights
+
+- **Ensemble Stability**: Did weights converge or continue oscillating? What does this mean?
+- **Model Diversity**: Does the system rely on multiple models or is it dominated by one?
+- **Prediction Quality**: Is the MAE/MAPE acceptable? How does it compare to baseline (naive)?
+- **Error Distribution**: Are errors consistent or do they vary significantly throughout the series?
+- **Recommendations**: Specific suggestions for improvement based on observed patterns
+
+FORMAT REQUIREMENTS:
+- Use clean Markdown with headers (##, ###)
+- NO EMOJIS - professional technical report style
+- Be specific and quantitative with actual numbers from the data
+- Avoid vague generalities - reference specific metrics
+- Length: 700-1000 words
+- Tone: Professional, technical, data-driven
+- Language: ENGLISH
+
+CRITICAL: Base your analysis EXCLUSIVELY on the REAL DATA provided above. Do not make assumptions about missing data or use placeholder reasoning. If real values show MAE=0, question if this indicates perfect prediction or data quality issues."""
+
+        # Llamar a Groq API
+        client = Groq(api_key=api_key)
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": "You are an expert data scientist in time series forecasting, ensemble methods, and adaptive systems. You provide deep, quantitative analysis based on actual data."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=3000,
+            temperature=0.6,
+        )
+        
+        analysis = response.choices[0].message.content
+        
+        return {
+            "success": True,
+            "analysis": analysis,
+            "series_id": id,
+            "total_points": total_points,
+            "ensemble_mae": round(ensemble_mae, 6),
+            "model_stats": model_stats,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+            
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Export file not found. Please export the report first using the 'Export Report' button."
+        )
+    except Exception as e:
+        logger.error(f"Error in AI analysis: {e}")
+        raise HTTPException(status_code=500, detail=f"AI analysis error: {str(e)}")
+
+
+@app.post("/api/analyze_report_advanced/{id}")
+async def analyze_report_advanced(
+    id: str,
+    body: dict = Body(...)
+):
+    """
+    Análisis avanzado con IA usando:
+    1. Pipeline report (datos de la última ejecución)
+    2. Export report opcional (CSV con histórico de weights y rankings)
+    
+    Proporciona análisis profundo y contextualizado.
+    """
+    try:
+        from groq import Groq
+        import csv
+        import json
+        
+        pipeline_report = body.get("pipeline_report", {})
+        export_report_csv = body.get("export_report")
+        export_filename = body.get("export_filename", "")
+        
+        # Configurar Groq API
+        api_key = os.getenv("GROQ_API_KEY")
+        if not api_key:
+            raise HTTPException(
+                status_code=500,
+                detail="GROQ_API_KEY not configured. Get free API key at: https://console.groq.com/keys"
+            )
+        
+        # Context for AI
+
+        pipeline_context = f"""
+            ## Pipeline Execution Report
+
+            **Series ID:** {pipeline_report.get('id', 'Unknown')}
+            **Total Data Points:** {pipeline_report.get('total', 0)}
+
+            ### Data Points Sample (first 5):
+            """
+        points = pipeline_report.get('points', [])[:5]
+        for i, p in enumerate(points, 1):
+            pipeline_context += f"\n{i}. Timestamp: {p.get('timestamp', 'N/A')}"
+            pipeline_context += f"\n   - Real value: {p.get('var', 'N/A')}"
+            pipeline_context += f"\n   - Prediction: {p.get('prediction', 'N/A')}"
+            pipeline_context += f"\n   - Chosen model: {p.get('chosen_model', 'N/A')}"
+            pipeline_context += f"\n   - Error: {p.get('chosen_error_abs', 'N/A')} (rel: {p.get('chosen_error_rel', 'N/A')}%)"
+        
+        # ===== Preparar contexto del export report =====
+        export_context = ""
+        if export_report_csv:
+            export_context = f"\n\n## Historical Export Report\n\n**File:** {export_filename}\n\n### CSV Preview (first 10 rows):\n\n"
+            csv_lines = export_report_csv.split('\n')
+            # Header + primeras 10 filas
+            preview_lines = csv_lines[:11]
+            export_context += '\n'.join(preview_lines)
+            export_context += "\n\n"
+            
+            # Análisis estadístico del CSV
+            try:
+                reader = csv.DictReader(export_report_csv.split('\n'))
+                rows = list(reader)
+                
+                if rows:
+                    # Extraer nombres de modelos
+
+                    # Export CSV Context
+                    model_names = [col.replace('w_', '') for col in rows[0].keys() if col.startswith('w_')]
+                    
+                    # Selection statistics
+                    selections = {}
+                    weights_evolution = {m: [] for m in model_names}
+                    rankings_by_model = {m: [] for m in model_names}
+                    
+                    for row in rows:
+                        chosen = row.get('chosen_by_error', '')
+                        if chosen:
+                            selections[chosen] = selections.get(chosen, 0) + 1
+                        
+                        for model in model_names:
+                            w_key = f'w_{model}'
+                            r_key = f'rank_{model}'
+                            if w_key in row:
+                                try:
+                                    weights_evolution[model].append(float(row[w_key]))
+                                except:
+                                    pass
+                            if r_key in row:
+                                try:
+                                    rankings_by_model[model].append(int(row[r_key]))
+                                except:
+                                    pass
+                    
+                    # Análisis de selección
+                    export_context += f"### Model Selection Summary ({len(rows)} steps):\n\n"
+                    for model in sorted(selections.keys(), key=lambda m: selections[m], reverse=True):
+                        pct = (selections[model] / len(rows)) * 100
+                        export_context += f"- **{model}**: {selections[model]} times ({pct:.1f}%)\n"
+                    
+                    # Análisis de pesos
+                    export_context += f"\n### Weight Evolution:\n\n"
+                    for model in model_names:
+                        if weights_evolution[model]:
+                            initial = weights_evolution[model][0]
+                            final = weights_evolution[model][-1]
+                            avg = sum(weights_evolution[model]) / len(weights_evolution[model])
+                            max_w = max(weights_evolution[model])
+                            min_w = min(weights_evolution[model])
+                            export_context += f"\n**{model}:**\n"
+                            export_context += f"  - Initial: {initial:.4f} → Final: {final:.4f}\n"
+                            export_context += f"  - Average: {avg:.4f} (Range: {min_w:.4f} to {max_w:.4f})\n"
+                    
+                    # Análisis de rankings
+                    export_context += f"\n### Average Rankings (lower is better):\n\n"
+                    for model in model_names:
+                        if rankings_by_model[model]:
+                            avg_rank = sum(rankings_by_model[model]) / len(rankings_by_model[model])
+                            export_context += f"- **{model}**: {avg_rank:.2f}\n"
+            
+            except Exception as e:
+                logger.warning(f"Error parsing export CSV: {e}")
+                export_context += f"\n(Could not fully parse CSV: {str(e)})"
+        
+        # ===== Crear prompt contextualizado para IA =====
+        analysis_prompt = f"""
+You are an expert data scientist specializing in ensemble learning, time series forecasting, and adaptive prediction systems.
+
+Analyze the following report in DEEP DETAIL with specific, actionable insights:
+
+{pipeline_context}
+
+{export_context}
+
+---
+
+Please provide a comprehensive analysis covering:
+
+1. **Model Performance Patterns**
+   - Which models performed best in different periods?
+   - Are there specific data characteristics where certain models excel?
+   - How consistent is each model's performance?
+
+2. **Weight Adaptation Quality**
+   - Is the weight evolution system working effectively?
+   - Are weights converging to stable values or oscillating?
+   - Do the weights correlate with actual model performance?
+
+3. **Selection Decisions**
+   - How frequently was each model selected?
+   - Is there diversity in model selection or dominance by one model?
+   - Are selection patterns correlated with data characteristics?
+
+4. **System Stability & Convergence**
+   - Is the ensemble showing signs of overfitting to certain patterns?
+   - How responsive is the system to changes in data characteristics?
+   - Recommendations for weight decay, learning rates, or system parameters?
+
+5. **Actionable Insights**
+   - What specific improvements could enhance predictions?
+   - Should any models be removed, replaced, or reweighted?
+   - Any data quality issues or anomalies to investigate?
+
+Provide specific numbers, percentages, and data-driven evidence for all claims.
+Use markdown formatting for clarity.
+"""
+
+        # Chat Completion Call Details
+
+        client = Groq(api_key=api_key)
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are an expert data scientist in time series forecasting and ensemble learning. Provide deep, quantitative, actionable analysis based on the actual data provided."
+                },
+                {
+                    "role": "user",
+                    "content": analysis_prompt
+                }
+            ],
+            max_tokens=4000,
+            temperature=0.7,
+        )
+        
+        analysis = response.choices[0].message.content
+        
+        return {
+            "success": True,
+            "analysis": analysis,
+            "series_id": id,
+            "analysis_type": "advanced",
+            "pipeline_points": len(points),
+            "export_file": export_filename if export_report_csv else None,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in advanced AI analysis: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Analysis error: {str(e)}")
+
 

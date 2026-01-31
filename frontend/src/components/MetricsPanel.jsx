@@ -1,4 +1,5 @@
 import React from "react";
+import { Medal } from "lucide-react";
 import "./MetricsPanel.css";
 
 export default function MetricsPanel({ combined, models, loading, error, selectedId }) {
@@ -26,9 +27,9 @@ export default function MetricsPanel({ combined, models, loading, error, selecte
 
   // AP4: Obtener medalla según posición
   const getRankDisplay = (idx) => {
-    if (idx === 0) return "🥇";
-    if (idx === 1) return "🥈";
-    if (idx === 2) return "🥉";
+    if (idx === 0) return <Medal size={16} style={{ color: "#FFD700", display: "inline" }} />;
+    if (idx === 1) return <Medal size={16} style={{ color: "#C0C0C0", display: "inline" }} />;
+    if (idx === 2) return <Medal size={16} style={{ color: "#CD7F32", display: "inline" }} />;
     return idx + 1;
   };
 

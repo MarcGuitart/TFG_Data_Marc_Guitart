@@ -5,7 +5,14 @@ class AlphaBetaModel(BaseModel):
     Filtro α-β 1D (posición y velocidad), ganancias fijas.
     Params: alpha (0..1), beta (0..1), dt (>0)
     """
-    def predict(self, series):
+    def predict(self, series, horizon=1):
+        """
+        Alpha-Beta filter prediction with multi-horizon support
+        
+        Args:
+            series: Historical values
+            horizon: Steps ahead (1=T+1, 2=T+2, etc.)
+        """
         alpha = float(self.cfg.get("alpha", 0.85))
         beta  = float(self.cfg.get("beta", 0.01))
         dt    = float(self.cfg.get("dt", 1.0))
@@ -23,4 +30,5 @@ class AlphaBetaModel(BaseModel):
             x = x_pred + alpha * r
             v = v + (beta * r) / dt
 
-        return x + v*dt
+        # Multi-step prediction: x(t+h) = x(t) + v*dt*h
+        return x + v * dt * horizon
