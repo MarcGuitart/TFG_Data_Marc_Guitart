@@ -1,4 +1,7 @@
-node_modules
+# ===================================
+# PROYECTO TFG - AGENTE ADAPTATIVO
+# ===================================
+
 # Python
 __pycache__/
 *.pyc
@@ -9,10 +12,17 @@ __pycache__/
 *.sqlite3
 *.db
 *.log
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
 
 # VSCode
 .vscode/
 .history/
+
+# JetBrains IDEs
+.idea/
 
 # FastAPI/Uvicorn
 *.pid
@@ -23,14 +33,25 @@ __pycache__/
 # InfluxDB
 *.influxdb-data
 
-# Data & results
-/data/
-*.csv
-*.xlsx
-*.json
-*.parquet
+# Data & Results 
+/data/*.csv
+/data/*.xlsx
+/data/*.json
+/data/*.parquet
+/data/*.numbers
+/data/weights_history_*.csv
+/data/Demo/
+/data/scenarios/*.json
+/data/test_csvs/
+!/data/.gitkeep
+!/data/scenarios/.gitkeep
 
-# Modelos y checkpoints
+# Results
+/results/*.png
+/results/*.csv
+/results/*.txt
+
+# Models & checkpoints
 *.h5
 *.ckpt
 *.pt
@@ -43,16 +64,60 @@ node_modules/
 dist/
 build/
 *.lock
+package-lock.json
 
 # OS files
 .DS_Store
 Thumbs.db
+*.swp
+*.swo
 
 # Docker
 *.pid
 *.sock
+docker-compose.override.yml
 
-# Otros
+# Configuración sensible (proteger tokens/secrets)
+config/app.env
+# Mantener solo el ejemplo
+!config/app.env.example
+
+# Documentos internos/temporales (NO PÚBLICOS)
+docs/internal_docs/
+docs/FIGURA_*
+docs/ZONA_*
+docs/ENDPOINT_*
+docs/*_INCONSISTENCY*
+docs/*_LIMITACIONES*
+docs/DIAGRAMS_*
+!docs/internal_docs/README.md
+
 *.bak
 *.swp
 *.tmp
+*.temp
+*~
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Testing
+.pytest_cache/
+coverage/
+.nyc_output/
+
+# MacOS
+.AppleDouble
+.LSOverride
+
+# Secrets
+.secrets/
+*.key
+*.pem
+*.crt
+credentials.json
+secrets.yaml
