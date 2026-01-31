@@ -1,4 +1,4 @@
-# 🤖 Adaptive Multi-Horizon Forecasting System with Intelligent Agent
+# My Bachelor's Computer Science Thesis: Software Agent for Self-Adaptative Time Series Prediction in Autonomous Network Environments.
 
 [![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://www.python.org/)
 [![React](https://img.shields.io/badge/React-18.0+-61DAFB.svg?logo=react)](https://reactjs.org/)
@@ -10,7 +10,7 @@
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
 - [Description](#-description)
 - [Key Features](#-key-features)
@@ -30,20 +30,20 @@
 
 ---
 
-## 🎯 Description
+## Description
 
 This project implements an **adaptive time series forecasting system** that combines multiple forecasting models (Linear Regression, Polynomial, Alpha-Beta, Kalman Filter) with an intelligent agent that dynamically selects the best model at each instant.
 
 The system uses a **weight-based memory mechanism** that continuously learns from the historical performance of each model, enabling:
 
-- 🔮 **Multi-horizon predictions**: From T+1 to T+200 (configurable)
-- 🧠 **Adaptive selection**: The agent chooses the optimal model in real-time
-- 📊 **Ranking system**: Models classified by cumulative performance
-- 🎯 **Memory with decay**: Weights evolve based on recent performance
-- 📈 **Real-time visualization**: Interactive dashboard with React
-- 🔄 **Streaming pipeline**: Continuous processing with Kafka
+-  **Multi-horizon predictions**: From T+1 to T+200 (configurable)
+-  **Adaptive selection**: The agent chooses the optimal model in real-time
+-  **Ranking system**: Models classified by cumulative performance
+-  **Memory with decay**: Weights evolve based on recent performance
+-  **Real-time visualization**: Interactive dashboard with React
+-  **Streaming pipeline**: Continuous processing with Kafka
 
-### 🎓 Academic Context
+### Academic Context
 
 This project is part of a Bachelor's Thesis in Computer Engineering, focused on:
 - Multi-agent systems
@@ -54,16 +54,16 @@ This project is part of a Bachelor's Thesis in Computer Engineering, focused on:
 
 ---
 
-## ✨ Key Features
+## Key Features
 
-### 🤖 Intelligent Agent with Memory
+### Intelligent Agent with Memory
 
 - **Dynamic weight system**: Each model accumulates points based on its performance
 - **Adaptive ranking**: Top-3 models with visual indicators (Trophy, Medal, Award icons)
 - **Exponential decay memory**: Greater weight to recent predictions
 - **History export**: Complete CSV with weight evolution
 
-### 📊 Multi-Perspective Analysis (AP1-AP4)
+### Multi-Perspective Analysis (AP1-AP4)
 
 1. **AP1 - Global Chart**: Complete visualization of predictions vs observations
    - Main chart with independent X/Y zoom
@@ -85,14 +85,14 @@ This project is part of a Bachelor's Thesis in Computer Engineering, focused on:
    - Cumulative final weight
    - Mean relative error
 
-### 🎯 Multi-Horizon Prediction
+### Multi-Horizon Prediction
 
 - Flexible horizon configuration: 1 to 200 steps ahead
 - Each step = 30 minutes of forecast
 - Simultaneous visualization of multiple horizons
 - Confidence intervals per horizon
 
-### 📈 Advanced Metrics
+### Advanced Metrics
 
 - **MAE** (Mean Absolute Error)
 - **RMSE** (Root Mean Square Error)
@@ -101,7 +101,7 @@ This project is part of a Bachelor's Thesis in Computer Engineering, focused on:
 - **Confidence per horizon**: 1 - MAPE
 - **Moving Average Accuracy**: Smoothing with moving window
 
-### 🔄 Streaming Data Pipeline
+### Streaming Data Pipeline
 
 - **Kafka**: Message queues for real-time data
 - **InfluxDB**: Time series database
@@ -110,7 +110,7 @@ This project is part of a Bachelor's Thesis in Computer Engineering, focused on:
 
 ---
 
-## 🏗️ System Architecture
+## System Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -159,7 +159,7 @@ This project is part of a Bachelor's Thesis in Computer Engineering, focused on:
 
 ---
 
-## 🛠️ Technologies Used
+## Technologies Used
 
 ### Backend
 
@@ -188,7 +188,7 @@ This project is part of a Bachelor's Thesis in Computer Engineering, focused on:
 
 ---
 
-## 📦 Prerequisites
+## Prerequisites
 
 ### Required Software
 
@@ -210,7 +210,7 @@ This project is part of a Bachelor's Thesis in Computer Engineering, focused on:
 
 ---
 
-## 🚀 Installation
+## Installation
 
 ### 1. Clone the Repository
 
@@ -268,7 +268,7 @@ http://localhost:5173
 
 ---
 
-## 🎮 Usage
+## Usage
 
 ### Basic Workflow
 
@@ -429,7 +429,7 @@ TFG_Agente_Data/
 
 ---
 
-## 🌐 API Endpoints
+## API Endpoints
 
 ### Orchestrator (port 8081)
 
@@ -499,7 +499,7 @@ POST /reset/{unit_id}      # Reset memory
 
 ---
 
-## 📊 Visualizations
+## Visualizations
 
 ### AP1 - Global Chart
 ![AP1 Global Chart](docs/images/ap1_global_chart.png)
@@ -524,14 +524,14 @@ POST /reset/{unit_id}      # Reset memory
 
 ### AP4 - Model Ranking
 ![AP4 Ranking](docs/images/ap4_ranking.png)
-- Top-3 models with badges (🏆🥈🥉)
+- Top-3 models with badges
 - MAE, RMSE, MAPE metrics
 - Final cumulative weight
 - Mean relative error
 
 ---
 
-## ⚙️ Advanced Configuration
+## Advanced Configuration
 
 ### Environment Variables
 
@@ -603,7 +603,7 @@ Edit `services/agent/memory_system.py`:
 
 ---
 
-## 🧪 Testing
+## Testing
 
 ### Unit Tests
 
@@ -645,7 +645,7 @@ curl -X POST http://localhost:8090/predict \
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 This project is an academic Bachelor's Thesis, but contributions are welcome for future improvements:
 
@@ -704,7 +704,7 @@ SOFTWARE.
 
 ---
 
-## 🙏 Acknowledgments
+##  Acknowledgments
 
 - **Thesis Director**: [Thesis Director Name]
 - **University**: Universitat Politècnica de Catalunya (UPC)
@@ -722,7 +722,7 @@ SOFTWARE.
 
 ---
 
-## 📚 References and Resources
+## References and Resources
 
 ### Papers and Articles
 
@@ -744,7 +744,7 @@ SOFTWARE.
 
 ---
 
-## 🔮 Future Roadmap
+## Future Roadmap
 
 ### Upcoming Features
 
@@ -768,7 +768,7 @@ SOFTWARE.
 
 ---
 
-## ❓ FAQ
+## FAQ
 
 ### How do I change the prediction horizon?
 
@@ -815,20 +815,17 @@ curl "http://localhost:8081/api/metrics/models/ranked?id=unit_01" | jq . > metri
 
 ---
 
-## 📞 Support
+## Support
 
 If you encounter any issues or have questions:
+Send me an email here: marc.guitart.fresco@gmail.com
 
-1. Review the [FAQ section](#-faq)
-2. Search in [Issues](https://github.com/MarcGuitart/TFG_Data_Marc_Guitart/issues)
-3. Open a new Issue with details (logs, screenshots, etc.)
-4. Contact the author via email
 
 ---
 
 <div align="center">
 
-**⭐ If this project has been useful to you, consider giving it a star on GitHub ⭐**
+**⭐ If you liked the project, consider giving it a star on GitHub ⭐**
 
 [🔝 Back to top](#-adaptive-multi-horizon-forecasting-system-with-intelligent-agent)
 
