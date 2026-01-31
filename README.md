@@ -502,28 +502,28 @@ POST /reset/{unit_id}      # Reset memory
 ## Visualizations
 
 ### AP1 - Global Chart
-![AP1 Global Chart](docs/images/ap1_global_chart.png)
+
 - Complete chart of observations vs predictions
 - Independent X/Y zoom
 - Visualization by horizon (T+1, T+20, etc.)
 - Confidence intervals
 
 ### AP2 - Adaptive Selector
-![AP2 Selector](docs/images/ap2_selector.png)
+
 - Table with step-by-step decisions
 - Model chosen at each instant
 - Point-wise relative error
 - Real vs predicted values
 
 ### AP3 - Weight Evolution
-![AP3 Weights](docs/images/ap3_weights.png)
+
 - Temporal chart of weights per model
 - Cumulative statistics table
 - Comparison chosen_by_error vs chosen_by_weight
 - History export
 
 ### AP4 - Model Ranking
-![AP4 Ranking](docs/images/ap4_ranking.png)
+
 - Top-3 models with badges
 - MAE, RMSE, MAPE metrics
 - Final cumulative weight
@@ -694,7 +694,7 @@ SOFTWARE.
 
 ---
 
-## 👤 Autor
+## Autor
 
 **Marc Guitart**
 
@@ -825,8 +825,8 @@ Send me an email here: marc.guitart.fresco@gmail.com
 
 <div align="center">
 
-**⭐ If you liked the project, consider giving it a star on GitHub ⭐**
+** If you liked the project, consider giving it a star on GitHub **
 
-[🔝 Back to top](#-adaptive-multi-horizon-forecasting-system-with-intelligent-agent)
+[Back to top](#-adaptive-multi-horizon-forecasting-system-with-intelligent-agent)
 
 </div>
